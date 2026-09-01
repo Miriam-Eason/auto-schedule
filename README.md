@@ -2,7 +2,7 @@
 
 离线桌面应用：排班计算器 + 可视化编辑器 + 历史值班账本。
 
-当前完成 **Phase 0**（done，2026-09-02）。下一阶段是 **Phase 1**：学期、教师与三 Sheet 导入。阶段状态与关闭记录见 [docs/PHASE_STATUS.md](docs/PHASE_STATUS.md)。
+当前完成 **Phase 0–1**（done，2026-09-02）。下一阶段是 **Phase 2**：月排班、日期类型与跨月特殊返校。阶段状态与关闭记录见 [docs/PHASE_STATUS.md](docs/PHASE_STATUS.md)。
 
 产品文档：
 
@@ -22,7 +22,8 @@
 | TypeScript | 5.8 strict                                       |
 | Vite       | 7                                                |
 | SQLite     | `rusqlite 0.40.2`，`bundled`，WAL + foreign_keys |
-| 测试       | Vitest 4（前端仓储）、`cargo test`（迁移/探针）  |
+| Excel      | ExcelJS 4.4（本地按需解析；`uuid` 覆盖至 11.x）  |
+| 测试       | Vitest 4、`cargo test`                           |
 
 未使用 `@tauri-apps/plugin-sql`：业务仓储需要事务、迁移版本表和 Rust 侧完整性检查，Phase 0 将 SQLite 放在 Rust 命令层。
 
@@ -66,7 +67,7 @@ macOS 开发模式下通常为：
 3. 按 `src-tauri/migrations/` 顺序执行尚未应用的迁移
 4. 运行 `PRAGMA integrity_check`
 
-重复启动不会重复写入 `schema_migrations`。当前最新模式版本为 `1`，只包含 `app_settings` 与开发探针表 `probe_events`。业务表从 Phase 1 起新增独立迁移。
+重复启动不会重复写入 `schema_migrations`。当前最新模式版本为 `2`：版本 1 包含 `app_settings` 与开发探针表 `probe_events`，版本 2 新增 `teachers`、`semesters`、`semester_teachers`。`probe_events` 仍不是业务账本。
 
 ## 迁移方法
 
@@ -79,4 +80,4 @@ macOS 开发模式下通常为：
 
 ## 持久化探针
 
-开发界面可写入一条探针记录。关闭应用再打开后，记录应仍在。这只用于验证本地 SQLite，不是业务功能。
+`probe_events` 与旧探针命令仍保留用于迁移回归；当前用户界面已切换为 Phase 1 教师与学期管理。探针只用于验证本地 SQLite，不是业务功能。

@@ -2,7 +2,7 @@
 
 > 文档版本：1.1  
 > 产品形态：离线桌面应用  
-> 实现状态：Phase 0 done（2026-09-02）；当前 Phase 1 todo  
+> 实现状态：Phase 0–1 done（2026-09-02）；当前 Phase 2 todo
 > 关联文档：[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[DATA_MODEL.md](./DATA_MODEL.md)、[TASKS.md](./TASKS.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
 ## 1. 产品概述
@@ -80,6 +80,8 @@
 
 验收：可创建合法学期；重叠或非法日期被阻止；关闭后默认只读。
 
+实现状态（Phase 1）：已支持新建、选择、关闭和重开；活动学期重叠与非法日期由 Rust 命令阻止。未确认月份提示随 Phase 2 月份表补入。
+
 ### F02 教师管理
 
 - 查看、搜索、新增、编辑、停用、恢复教师。
@@ -89,6 +91,8 @@
 
 验收：符合 R001–R008；重名不导致数据串联；初始公平次数不产生虚假记录。
 
+实现状态（Phase 1）：已实现 R001–R004 和教师管理 UI；实际次数当前由空账本显示为 0，R005–R008 的统一账本重算在 Phase 3 实现。
+
 ### F03 Excel 教师导入
 
 - 支持三 Sheet：1–3 楼、4–5 楼、大值班。
@@ -97,6 +101,8 @@
 - 用户确认后一次性导入。
 
 验收：失败不留下部分数据；大值班缺少楼层时必须人工解决；导入后不依赖原文件运行。
+
+实现状态（Phase 1）：已实现 Sheet/列映射、预览、逐行校验、已有主档歧义提示和 Rust 单事务提交；Excel 仅在用户选择文件时按需解析。
 
 ### F04 月份与值班日历
 
@@ -236,6 +242,7 @@ Tauri 2.11.5 / CLI 2.11.4 / JS API 2.11.1
 React 19.2 / TypeScript 5.8 strict / Vite 7.3
 SQLite：rusqlite 0.40.2 bundled（Rust 命令层，非 @tauri-apps/plugin-sql）
 测试：Vitest 4、cargo test
+Excel：ExcelJS 4.4（仅本地解析，按需加载）
 ```
 
 ### 7.2 分层

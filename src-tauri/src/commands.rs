@@ -1,6 +1,9 @@
 use tauri::State;
 
-use crate::db::{AppDb, DatabaseInfo, ProbeEvent};
+use crate::db::{
+    AppDb, CreateSemesterRequest, DatabaseInfo, ImportResult, ImportTeachersRequest, ProbeEvent,
+    SaveTeacherRequest, Semester, SemesterTeacherView, Teacher,
+};
 use crate::error::AppError;
 
 #[tauri::command]
@@ -17,4 +20,70 @@ pub fn probe_insert(db: State<AppDb>, event: ProbeEvent) -> Result<ProbeEvent, A
 #[tauri::command]
 pub fn probe_list(db: State<AppDb>) -> Result<Vec<ProbeEvent>, AppError> {
     db.list_probe()
+}
+
+#[tauri::command]
+pub fn semester_list(db: State<AppDb>) -> Result<Vec<Semester>, AppError> {
+    db.list_semesters()
+}
+
+#[tauri::command]
+pub fn semester_create(
+    db: State<AppDb>,
+    request: CreateSemesterRequest,
+) -> Result<Semester, AppError> {
+    db.create_semester(&request)
+}
+
+#[tauri::command]
+pub fn semester_set_status(
+    db: State<AppDb>,
+    id: String,
+    status: String,
+) -> Result<Semester, AppError> {
+    db.set_semester_status(&id, &status)
+}
+
+#[tauri::command]
+pub fn semester_get_selected(db: State<AppDb>) -> Result<Option<String>, AppError> {
+    db.selected_semester_id()
+}
+
+#[tauri::command]
+pub fn semester_select(db: State<AppDb>, id: String) -> Result<(), AppError> {
+    db.select_semester(&id)
+}
+
+#[tauri::command]
+pub fn teacher_list(db: State<AppDb>) -> Result<Vec<Teacher>, AppError> {
+    db.list_teachers()
+}
+
+#[tauri::command]
+pub fn semester_teacher_list(
+    db: State<AppDb>,
+    semester_id: String,
+) -> Result<Vec<SemesterTeacherView>, AppError> {
+    db.list_semester_teachers(&semester_id)
+}
+
+#[tauri::command]
+pub fn teacher_save(
+    db: State<AppDb>,
+    request: SaveTeacherRequest,
+) -> Result<SemesterTeacherView, AppError> {
+    db.save_teacher(&request)
+}
+
+#[tauri::command]
+pub fn teacher_set_active(db: State<AppDb>, id: String, active: bool) -> Result<Teacher, AppError> {
+    db.set_teacher_active(&id, active)
+}
+
+#[tauri::command]
+pub fn teacher_import_commit(
+    db: State<AppDb>,
+    request: ImportTeachersRequest,
+) -> Result<ImportResult, AppError> {
+    db.import_teachers(&request)
 }

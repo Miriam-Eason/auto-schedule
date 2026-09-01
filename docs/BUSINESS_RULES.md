@@ -1,7 +1,7 @@
 # 财会系值班排班系统：业务规则规格
 
 > 文档版本：1.1  
-> 状态：开发基线；规则正文未改。Phase 0 未实现任何 Rxxx（骨架与持久化探针 only）  
+> 状态：开发基线；规则正文未改。Phase 1 已实现并测试 R001–R004；R005–R050 按后续 Phase 实施
 > 关联文档：[PRD.md](./PRD.md)、[DATA_MODEL.md](./DATA_MODEL.md)、[TASKS.md](./TASKS.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
 ## 1. 文档目的

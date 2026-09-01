@@ -1,8 +1,8 @@
 # 阶段状态与关闭记录
 
 > 文档版本：1.1  
-> 当前阶段：**Phase 1（todo）**  
-> 上一完成阶段：**Phase 0（done，2026-09-02）**  
+> 当前阶段：**Phase 2（todo）**
+> 上一完成阶段：**Phase 1（done，2026-09-02）**
 > 关联文档：[TASKS.md](./TASKS.md)、[PRD.md](./PRD.md)、[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[DATA_MODEL.md](./DATA_MODEL.md)、[../AGENTS.md](../AGENTS.md)
 
 每个 Phase 结束时必须把本文件中对应条目从 `todo` 改为 `done`，并填写关闭记录。未开始的阶段保持 `todo`，不要预填完成项。
@@ -12,7 +12,7 @@
 | Phase | 名称 | 状态 | 关闭日期 |
 |---|---|---|---|
 | 0 | 项目骨架与持久化探针 | done | 2026-09-02 |
-| 1 | 学期、教师与三 Sheet 导入 | todo | — |
+| 1 | 学期、教师与三 Sheet 导入 | done | 2026-09-02 |
 | 2 | 月排班、日期类型与跨月特殊返校 | todo | — |
 | 3 | 人工固定排班、月度排除与账本统计 | todo | — |
 | 4 | 纯 TypeScript 排班引擎 | todo | — |
@@ -88,6 +88,76 @@
 ### 下一 Phase 输入条件
 
 已满足：SQLite 迁移入口可用、macOS 构建通过、`reference/系部教师名单.xlsx` 在仓库中。可以开始 Phase 1。
+
+---
+
+## Phase 1 关闭记录（done）
+
+- 关闭日期：2026-09-02
+- 状态变化：`todo` → `done`
+
+### 完成项
+
+- 新增模式版本 2：`teachers`、`semesters`、`semester_teachers`，含外键、枚举、唯一约束、非负公平基线和查询索引。
+- 新增 Rust/Tauri 学期命令：列表、新建、选择、关闭、重开；校验真实 `YYYY-MM-DD`、起止顺序及活动学期日期重叠。
+- 新增教师与学期快照命令：查看、搜索、新增、编辑、从主档加入、停用/恢复、楼层、大值班、学期参与和初始公平次数。
+- R001–R004 落地：教师 UUID 关联、历史显示名/楼层快照、停用不删除、楼层与大值班独立、实际次数与公平口径次数分列。
+- UI 从 Phase 0 探针切换为“教师与学期”工作区；关闭学期默认只读，重新打开需显式操作。
+- 使用 ExcelJS 4.4 实现本地 `.xlsx` 按需读取、三 Sheet/姓名列映射、预览摘要和逐行错误；尾部空行忽略，中间空名阻止提交。
+- 导入校验覆盖同 Sheet 重名、跨楼层重复、大值班缺楼层、空姓名、已有主档同名歧义；大值班合并为楼层教师标签。
+- 确认导入走单个 Rust SQLite 事务；已有教师按唯一 ID 匹配，新教师和学期快照原子写入，失败全部回滚；运行时不依赖原 Excel。
+- 将 ExcelJS 间接 `uuid` 覆盖到已修复的 11.x；生产依赖审计为 0 个已知漏洞。
+
+### 未完成项 / 明确不做
+
+- 月排班、日期类型、特殊返校、人工任务与排班算法按 Phase 2 起实施，本阶段未提前创建相关表或功能。
+- 教师不提供物理删除；“删除”按 R002 落为停用/恢复，以保留历史关联。
+- 未把真实教师姓名写入测试夹具、快照或新代码；手工校验只输出 Sheet 名、行数和错误计数。
+
+### 测试结果
+
+| 命令 | 结果 |
+|---|---|
+| `npm run typecheck` | 通过 |
+| `npm test` | 8 通过（2 个文件）：内存探针 2、三 Sheet 预览校验 6 |
+| `npm run test:rust` | 9 通过：空库/版本 1 升级、幂等迁移、探针保留、学期日期/重叠、快照/公平基线、停用恢复、导入回滚 |
+| `npm run build` | 通过；ExcelJS 独立按需块约 937 kB（gzip 271 kB），Vite 有大块提示 |
+| `npm run format:check` | 通过 |
+| `cargo clippy --all-targets -- -D warnings` | 通过 |
+| `npm run tauri:build` | 通过；生成 `.app` 与 `.dmg`（沙箱内 DMG 脚本受限，授权后重跑成功） |
+| `npm audit --omit=dev` | 通过，0 vulnerabilities |
+
+手工验证：
+
+- 用 `reference/系部教师名单.xlsx` 读取到三个目标 Sheet：楼层教师 44 行、大值班 5 行；同 Sheet 重复 0、跨楼层重复 0、大值班缺楼层 0。未提交真实教师数据。
+- 启动 release `.app`，确认“教师与学期”窗口、工作学期卡片、新建表单、Phase 状态和空状态均正常渲染；未创建测试学期或改写用户数据库，验证后关闭应用。
+- macOS `.app` 和 `.dmg` 产物均实际生成。
+
+### 改动文件
+
+- 迁移与 Rust：`src-tauri/migrations/002_teachers_semesters.sql`、`src-tauri/src/{db,commands,lib}.rs`
+- 前端业务：`src/app/RosterApp.tsx`、`src/domain/teacherImport.ts`、`src/domain/teacherImport.test.ts`
+- 仓储与入口：`src/repositories/{types,sqlite}.ts`、`src/{App.tsx,App.css}`
+- 依赖：`package.json`、`package-lock.json`（ExcelJS 4.4、`uuid` 11.x override）
+- 文档：`AGENTS.md`、`README.md`、`docs/{PRD,BUSINESS_RULES,DATA_MODEL,TASKS,PHASE_STATUS}.md`
+
+### 文档更新
+
+- [PRD.md](./PRD.md)：实现状态推进到 Phase 2，锁定 ExcelJS 本地按需解析。
+- [BUSINESS_RULES.md](./BUSINESS_RULES.md)：规则正文未改；标记 R001–R004 已有实现与测试。
+- [DATA_MODEL.md](./DATA_MODEL.md)：最新模式版本改为 2，记录三张 Phase 1 业务表及后续待实现表。
+- [TASKS.md](./TASKS.md)：Phase 1 标 done，关闭摘要与下一任务改为 Phase 2。
+- [../README.md](../README.md) / [../AGENTS.md](../AGENTS.md)：更新当前阶段、依赖和数据库版本。
+
+### 遗留问题
+
+1. ExcelJS 按需块触发 Vite 500 kB 提示；它不进入首屏主块且离线导入可用，后续如启动/安装体积成为问题再评估更轻解析器。
+2. 为避免污染用户数据库，本次未在 release 应用中实际提交真实教师名单；解析、完整校验与事务提交分别由真实文件结构检查和自动测试覆盖。Phase 8 仍需按计划执行真实数据端到端回放。
+3. `reference/排班导出模版.xlsx` 仍缺失，继续阻挡 Phase 7 模板导出，不阻挡 Phase 2–6。
+
+### 下一 Phase 输入条件
+
+已满足：模式版本 2、学期选择与只读状态、教师学期快照、Rust 事务命令、业务日期字符串约束均可供 Phase 2 复用。下一步只实施 `monthly_schedules`、`duty_dates`、日期类型与 R009–R014 跨月特殊返校，不接入教师排班。
 
 ---
 

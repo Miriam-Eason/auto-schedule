@@ -1,8 +1,8 @@
 # 财会系值班排班系统：开发任务与验收计划
 
 > 文档版本：1.1  
-> 当前阶段：Phase 1（todo）  
-> 上一完成阶段：Phase 0（done，2026-09-02）  
+> 当前阶段：Phase 2（todo）
+> 上一完成阶段：Phase 1（done，2026-09-02）
 > 使用方式：每次只执行一个 Phase；先阅读全部文档和 `AGENTS.md`，再按本文件交付。结束时必须把状态从 todo 改为 done，并更新 [PHASE_STATUS.md](./PHASE_STATUS.md)。  
 > 关联文档：[PRD.md](./PRD.md)、[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[DATA_MODEL.md](./DATA_MODEL.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
@@ -88,7 +88,7 @@ duty-roster/
 
 完成项：Tauri 2 骨架、`rusqlite` 迁移、探针仓储、macOS 构建。测试：`typecheck` / Vitest 2 / cargo test 4 / `tauri build` 均通过；重启后探针行仍在。遗留：导出模版 xlsx 缺失；`probe_events` 非业务表。
 
-## Phase 1：学期、教师与三 Sheet 导入 【todo】
+## Phase 1：学期、教师与三 Sheet 导入 【done】
 
 ### 目标
 
@@ -109,6 +109,12 @@ duty-roster/
 - 停用教师历史快照不变。
 - 初始公平次数非负并与实际次数分开展示。
 - 导入失败不留下部分数据。
+
+### 状态
+
+**done**（2026-09-02）。关闭记录见 [PHASE_STATUS.md](./PHASE_STATUS.md#phase-1-关闭记录done)。
+
+完成项：模式版本 2、学期/教师/学期快照 Rust 仓储与 UI、三 Sheet 映射预览校验和原子提交。测试：Vitest 8、cargo test 9、typecheck/build/format、macOS `.app`/`.dmg` 均通过；真实工作簿只校验结构与规则，未提交教师数据。遗留：ExcelJS 按需块约 937 kB（gzip 271 kB），不影响离线导入，后续可评估更轻解析器。
 
 ## Phase 2：月排班、日期类型与跨月特殊返校 【todo】
 
@@ -322,5 +328,5 @@ duty-roster/
 
 ```text
 阅读 docs/PRD.md、docs/BUSINESS_RULES.md、docs/DATA_MODEL.md、docs/TASKS.md、docs/PHASE_STATUS.md 以及仓库 AGENTS.md。
-只实施 TASKS.md 的 Phase 1：学期、教师与三 Sheet 导入。实现 teachers / semesters / semester_teachers 及迁移，学期新建关闭选择，教师增删改停用恢复，楼层与大值班身份，三 Sheet 导入预览校验事务提交。不要实现日历或排班算法。完成后把 Phase 1 从 todo 改为 done，按 AGENTS.md 更新 PHASE_STATUS 关闭记录并同步相关文档，等待验收。
+只实施 TASKS.md 的 Phase 2：月排班、日期类型与跨月特殊返校。实现 monthly_schedules / duty_dates 及迁移，月历选择系部值班日，NORMAL / SPECIAL_MANUAL 日期类型，连续周期与跨月特殊返校推导，历史不足待确认和人工改写来源，并建立草稿/已确认基础只读状态。不要实现教师排班、固定任务或自动算法。完成后把 Phase 2 从 todo 改为 done，按 AGENTS.md 更新 PHASE_STATUS 关闭记录并同步相关文档，等待验收。
 ```

@@ -1,7 +1,7 @@
 # 财会系值班排班系统：数据模型
 
 > 文档版本：1.1  
-> 状态：开发基线；模式版本 1 已落地（Phase 0 done）  
+> 状态：开发基线；模式版本 2 已落地（Phase 1 done，2026-09-02）
 > 关联文档：[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[PRD.md](./PRD.md)、[TASKS.md](./TASKS.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
 ## 1. 建模原则
@@ -183,15 +183,18 @@ CHECK(
 
 `schema_migrations` 记录迁移版本，禁止运行时临时改表。`app_settings` 仅保存界面偏好、默认导出路径等非业务事实；当前学期可以保存为偏好，但业务查询不得依赖它代替外键。
 
-**Phase 0 已落地（模式版本 1）：**
+**Phase 0–1 已落地（最新模式版本 2）：**
 
 | 表 | 状态 | 说明 |
 |---|---|---|
 | `schema_migrations` | 已实现 | `version` PK、`name` UNIQUE、`applied_at`。空库迁到 1；重复启动不重复插入。 |
 | `app_settings` | 已建表 | `key` PK、`value`、`updated_at`。尚无业务读写。 |
 | `probe_events` | 开发探针 | 仅验证重启持久化，**不是**值班账本，Phase 1 不得当教师/排班表使用。 |
+| `teachers` | 已实现 | 教师主档；UUID 主键，支持停用/恢复，重名不作为关联键。 |
+| `semesters` | 已实现 | 学期新建、选择、关闭/重开；合法日期与活动学期重叠在命令层校验。 |
+| `semester_teachers` | 已实现 | 学期成员快照、楼层、大值班、参与状态与非负公平基线。 |
 
-业务表 `teachers`、`semesters`、`semester_teachers` 等仍为待实现，从 Phase 1 起用 `002_*.sql` 连续迁移添加。数据库文件：macOS 开发/安装后位于 `~/Library/Application Support/com.caihui.duty-roster/duty-roster.db`。启动时开启 `foreign_keys` 与 WAL，并执行 `PRAGMA integrity_check`。
+迁移 `002_teachers_semesters.sql` 已添加前三张业务表；`monthly_schedules` 及后续账本表仍待 Phase 2–3。数据库文件：macOS 开发/安装后位于 `~/Library/Application Support/com.caihui.duty-roster/duty-roster.db`。启动时开启 `foreign_keys` 与 WAL，并执行 `PRAGMA integrity_check`。
 
 ## 5. 派生视图与查询口径
 

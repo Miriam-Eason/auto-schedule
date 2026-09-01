@@ -1,6 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import { AppError, type DatabaseInfo, type ProbeEvent, type ProbeRepository } from "./types";
+import {
+  AppError,
+  type CreateSemesterRequest,
+  type DatabaseInfo,
+  type ImportResult,
+  type ImportTeachersRequest,
+  type ProbeEvent,
+  type ProbeRepository,
+  type RosterRepository,
+  type SaveTeacherRequest,
+  type Semester,
+  type SemesterStatus,
+  type SemesterTeacher,
+  type Teacher,
+} from "./types";
 
 function toAppError(error: unknown): AppError {
   if (error instanceof AppError) {
@@ -39,5 +53,55 @@ export class SqliteProbeRepository implements ProbeRepository {
     } catch (error) {
       throw toAppError(error);
     }
+  }
+}
+
+async function invokeRoster<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return await invoke<T>(command, args);
+  } catch (error) {
+    throw toAppError(error);
+  }
+}
+
+export class SqliteRosterRepository implements RosterRepository {
+  listSemesters(): Promise<Semester[]> {
+    return invokeRoster("semester_list");
+  }
+
+  createSemester(request: CreateSemesterRequest): Promise<Semester> {
+    return invokeRoster("semester_create", { request });
+  }
+
+  setSemesterStatus(id: string, status: SemesterStatus): Promise<Semester> {
+    return invokeRoster("semester_set_status", { id, status });
+  }
+
+  getSelectedSemesterId(): Promise<string | null> {
+    return invokeRoster("semester_get_selected");
+  }
+
+  selectSemester(id: string): Promise<void> {
+    return invokeRoster("semester_select", { id });
+  }
+
+  listTeachers(): Promise<Teacher[]> {
+    return invokeRoster("teacher_list");
+  }
+
+  listSemesterTeachers(semesterId: string): Promise<SemesterTeacher[]> {
+    return invokeRoster("semester_teacher_list", { semesterId });
+  }
+
+  saveTeacher(request: SaveTeacherRequest): Promise<SemesterTeacher> {
+    return invokeRoster("teacher_save", { request });
+  }
+
+  setTeacherActive(id: string, active: boolean): Promise<Teacher> {
+    return invokeRoster("teacher_set_active", { id, active });
+  }
+
+  importTeachers(request: ImportTeachersRequest): Promise<ImportResult> {
+    return invokeRoster("teacher_import_commit", { request });
   }
 }

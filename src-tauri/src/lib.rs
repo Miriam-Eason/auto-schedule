@@ -23,6 +23,16 @@ pub fn run() {
             commands::get_database_info,
             commands::probe_insert,
             commands::probe_list,
+            commands::semester_list,
+            commands::semester_create,
+            commands::semester_set_status,
+            commands::semester_get_selected,
+            commands::semester_select,
+            commands::teacher_list,
+            commands::semester_teacher_list,
+            commands::teacher_save,
+            commands::teacher_set_active,
+            commands::teacher_import_commit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,11 +1,11 @@
-import { ProbePanel } from "./app/ProbePanel";
-import { SqliteProbeRepository } from "./repositories/sqlite";
+import { RosterApp } from "./app/RosterApp";
+import { SqliteRosterRepository } from "./repositories/sqlite";
 import "./App.css";
 
-const repository = new SqliteProbeRepository();
+const repository = new SqliteRosterRepository();
 
 function App() {
-  return <ProbePanel repository={repository} />;
+  return <RosterApp repository={repository} />;
 }
 
 export default App;
