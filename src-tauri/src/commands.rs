@@ -1,7 +1,8 @@
 use tauri::State;
 
 use crate::db::{
-    AppDb, CreateSemesterRequest, DatabaseInfo, ImportResult, ImportTeachersRequest, ProbeEvent,
+    AppDb, CreateMonthlyScheduleRequest, CreateSemesterRequest, DatabaseInfo, DutyDate,
+    ImportResult, ImportTeachersRequest, MonthlySchedule, ProbeEvent, SaveDutyDateRequest,
     SaveTeacherRequest, Semester, SemesterTeacherView, Teacher,
 };
 use crate::error::AppError;
@@ -86,4 +87,61 @@ pub fn teacher_import_commit(
     request: ImportTeachersRequest,
 ) -> Result<ImportResult, AppError> {
     db.import_teachers(&request)
+}
+
+#[tauri::command]
+pub fn monthly_schedule_list(
+    db: State<AppDb>,
+    semester_id: String,
+) -> Result<Vec<MonthlySchedule>, AppError> {
+    db.list_monthly_schedules(&semester_id)
+}
+
+#[tauri::command]
+pub fn monthly_schedule_create(
+    db: State<AppDb>,
+    request: CreateMonthlyScheduleRequest,
+) -> Result<MonthlySchedule, AppError> {
+    db.create_monthly_schedule(&request)
+}
+
+#[tauri::command]
+pub fn monthly_schedule_set_status(
+    db: State<AppDb>,
+    id: String,
+    status: String,
+) -> Result<MonthlySchedule, AppError> {
+    db.set_monthly_schedule_status(&id, &status)
+}
+
+#[tauri::command]
+pub fn duty_date_list(db: State<AppDb>, schedule_id: String) -> Result<Vec<DutyDate>, AppError> {
+    db.list_duty_dates(&schedule_id)
+}
+
+#[tauri::command]
+pub fn duty_date_save(
+    db: State<AppDb>,
+    request: SaveDutyDateRequest,
+) -> Result<Vec<DutyDate>, AppError> {
+    db.save_duty_date(&request)
+}
+
+#[tauri::command]
+pub fn duty_date_delete(
+    db: State<AppDb>,
+    schedule_id: String,
+    duty_date: String,
+) -> Result<Vec<DutyDate>, AppError> {
+    db.delete_duty_date(&schedule_id, &duty_date)
+}
+
+#[tauri::command]
+pub fn duty_date_set_special_return(
+    db: State<AppDb>,
+    schedule_id: String,
+    duty_date: String,
+    value: Option<bool>,
+) -> Result<Vec<DutyDate>, AppError> {
+    db.set_special_return(&schedule_id, &duty_date, value)
 }

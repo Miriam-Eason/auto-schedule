@@ -1,8 +1,8 @@
 # 财会系值班排班系统：开发任务与验收计划
 
 > 文档版本：1.1  
-> 当前阶段：Phase 2（todo）
-> 上一完成阶段：Phase 1（done，2026-09-02）
+> 当前阶段：Phase 3（todo）
+> 上一完成阶段：Phase 2（done，2026-09-02）
 > 使用方式：每次只执行一个 Phase；先阅读全部文档和 `AGENTS.md`，再按本文件交付。结束时必须把状态从 todo 改为 done，并更新 [PHASE_STATUS.md](./PHASE_STATUS.md)。  
 > 关联文档：[PRD.md](./PRD.md)、[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[DATA_MODEL.md](./DATA_MODEL.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
@@ -116,7 +116,7 @@ duty-roster/
 
 完成项：模式版本 2、学期/教师/学期快照 Rust 仓储与 UI、三 Sheet 映射预览校验和原子提交。测试：Vitest 8、cargo test 9、typecheck/build/format、macOS `.app`/`.dmg` 均通过；真实工作簿只校验结构与规则，未提交教师数据。遗留：ExcelJS 按需块约 937 kB（gzip 271 kB），不影响离线导入，后续可评估更轻解析器。
 
-## Phase 2：月排班、日期类型与跨月特殊返校 【todo】
+## Phase 2：月排班、日期类型与跨月特殊返校 【done】
 
 ### 目标
 
@@ -137,6 +137,12 @@ duty-roster/
 - 3 月 31 日连续到 4 月 1 日时不误标。
 - 缺少 8 月历史时，9 月首日不被静默判定。
 - 修改前月日期后，相关月的推导提示正确刷新。
+
+### 状态
+
+**done**（2026-09-02）。关闭记录见 [PHASE_STATUS.md](./PHASE_STATUS.md#phase-2-关闭记录done)。
+
+完成项：模式版本 3、月份/日期 Rust 仓储、月历 UI、R009–R014 跨月与待确认推导、人工改写来源、草稿/确认基础状态。测试：Vitest 8、cargo test 13、typecheck/build/format/clippy、macOS `.app`/`.dmg` 均通过。遗留：Phase 6 才补齐岗位完整性确认规则；真实业务数据回放留在 Phase 8。
 
 ## Phase 3：人工固定排班、月度排除与账本统计 【todo】
 
@@ -303,13 +309,13 @@ duty-roster/
 
 ## 3. 里程碑
 
-| 里程碑 | 包含 Phase | 状态 | 可交付能力 |
-|---|---|---|---|
-| M0 技术可行 | 0 | done | 桌面壳与持久化成立。 |
-| M1 可人工排班 | 1–3 | todo | 可用真实数据人工完成并保存一张表。 |
-| M2 可自动排班 | 4–6 | todo | 算法、解释、调整与确认闭环。 |
-| M3 可安全交付 | 7–8 | todo | 导出、备份、真实数据验证。 |
-| M4 跨平台发布 | 9 | todo | macOS 与 Windows 安装包。 |
+| 里程碑        | 包含 Phase | 状态 | 可交付能力                         |
+| ------------- | ---------- | ---- | ---------------------------------- |
+| M0 技术可行   | 0          | done | 桌面壳与持久化成立。               |
+| M1 可人工排班 | 1–3        | todo | 可用真实数据人工完成并保存一张表。 |
+| M2 可自动排班 | 4–6        | todo | 算法、解释、调整与确认闭环。       |
+| M3 可安全交付 | 7–8        | todo | 导出、备份、真实数据验证。         |
+| M4 跨平台发布 | 9          | todo | macOS 与 Windows 安装包。          |
 
 ## 4. 全局完成定义（Definition of Done）
 
@@ -328,5 +334,5 @@ duty-roster/
 
 ```text
 阅读 docs/PRD.md、docs/BUSINESS_RULES.md、docs/DATA_MODEL.md、docs/TASKS.md、docs/PHASE_STATUS.md 以及仓库 AGENTS.md。
-只实施 TASKS.md 的 Phase 2：月排班、日期类型与跨月特殊返校。实现 monthly_schedules / duty_dates 及迁移，月历选择系部值班日，NORMAL / SPECIAL_MANUAL 日期类型，连续周期与跨月特殊返校推导，历史不足待确认和人工改写来源，并建立草稿/已确认基础只读状态。不要实现教师排班、固定任务或自动算法。完成后把 Phase 2 从 todo 改为 done，按 AGENTS.md 更新 PHASE_STATUS 关闭记录并同步相关文档，等待验收。
+只实施 TASKS.md 的 Phase 3：人工固定排班、月度排除与账本统计。实现 assignments / monthly_exclusions 及迁移，普通日岗位人工放人、集中日任意人数、全部固定任务类型、大值班占岗位/不占岗位、月度排除与人工突破警告，以及按人日重算的月度/学期/特殊返校统计。不要实现自动排班引擎。完成后把 Phase 3 从 todo 改为 done，按 AGENTS.md 更新 PHASE_STATUS 关闭记录并同步相关文档，等待验收。
 ```

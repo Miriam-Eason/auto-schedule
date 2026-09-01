@@ -33,6 +33,13 @@ pub fn run() {
             commands::teacher_save,
             commands::teacher_set_active,
             commands::teacher_import_commit,
+            commands::monthly_schedule_list,
+            commands::monthly_schedule_create,
+            commands::monthly_schedule_set_status,
+            commands::duty_date_list,
+            commands::duty_date_save,
+            commands::duty_date_delete,
+            commands::duty_date_set_special_return,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,7 +2,7 @@
 
 离线桌面应用：排班计算器 + 可视化编辑器 + 历史值班账本。
 
-当前完成 **Phase 0–1**（done，2026-09-02）。下一阶段是 **Phase 2**：月排班、日期类型与跨月特殊返校。阶段状态与关闭记录见 [docs/PHASE_STATUS.md](docs/PHASE_STATUS.md)。
+当前完成 **Phase 0–2**（done，2026-09-02）。下一阶段是 **Phase 3**：人工固定排班、月度排除与账本统计。阶段状态与关闭记录见 [docs/PHASE_STATUS.md](docs/PHASE_STATUS.md)。
 
 产品文档：
 
@@ -67,7 +67,7 @@ macOS 开发模式下通常为：
 3. 按 `src-tauri/migrations/` 顺序执行尚未应用的迁移
 4. 运行 `PRAGMA integrity_check`
 
-重复启动不会重复写入 `schema_migrations`。当前最新模式版本为 `2`：版本 1 包含 `app_settings` 与开发探针表 `probe_events`，版本 2 新增 `teachers`、`semesters`、`semester_teachers`。`probe_events` 仍不是业务账本。
+重复启动不会重复写入 `schema_migrations`。当前最新模式版本为 `3`：版本 1 包含 `app_settings` 与开发探针表 `probe_events`，版本 2 新增 `teachers`、`semesters`、`semester_teachers`，版本 3 新增 `monthly_schedules`、`duty_dates`。`probe_events` 仍不是业务账本。
 
 ## 迁移方法
 
@@ -80,4 +80,4 @@ macOS 开发模式下通常为：
 
 ## 持久化探针
 
-`probe_events` 与旧探针命令仍保留用于迁移回归；当前用户界面已切换为 Phase 1 教师与学期管理。探针只用于验证本地 SQLite，不是业务功能。
+`probe_events` 与旧探针命令仍保留用于迁移回归；当前用户界面已加入 Phase 2 月份与值班日历。探针只用于验证本地 SQLite，不是业务功能。

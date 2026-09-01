@@ -3,13 +3,18 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   AppError,
   type CreateSemesterRequest,
+  type CreateMonthlyScheduleRequest,
   type DatabaseInfo,
+  type DutyDate,
   type ImportResult,
   type ImportTeachersRequest,
   type ProbeEvent,
   type ProbeRepository,
   type RosterRepository,
+  type MonthlySchedule,
+  type SaveDutyDateRequest,
   type SaveTeacherRequest,
+  type ScheduleStatus,
   type Semester,
   type SemesterStatus,
   type SemesterTeacher,
@@ -103,5 +108,37 @@ export class SqliteRosterRepository implements RosterRepository {
 
   importTeachers(request: ImportTeachersRequest): Promise<ImportResult> {
     return invokeRoster("teacher_import_commit", { request });
+  }
+
+  listMonthlySchedules(semesterId: string): Promise<MonthlySchedule[]> {
+    return invokeRoster("monthly_schedule_list", { semesterId });
+  }
+
+  createMonthlySchedule(request: CreateMonthlyScheduleRequest): Promise<MonthlySchedule> {
+    return invokeRoster("monthly_schedule_create", { request });
+  }
+
+  setMonthlyScheduleStatus(id: string, status: ScheduleStatus): Promise<MonthlySchedule> {
+    return invokeRoster("monthly_schedule_set_status", { id, status });
+  }
+
+  listDutyDates(scheduleId: string): Promise<DutyDate[]> {
+    return invokeRoster("duty_date_list", { scheduleId });
+  }
+
+  saveDutyDate(request: SaveDutyDateRequest): Promise<DutyDate[]> {
+    return invokeRoster("duty_date_save", { request });
+  }
+
+  deleteDutyDate(scheduleId: string, dutyDate: string): Promise<DutyDate[]> {
+    return invokeRoster("duty_date_delete", { scheduleId, dutyDate });
+  }
+
+  setSpecialReturn(
+    scheduleId: string,
+    dutyDate: string,
+    value: boolean | null,
+  ): Promise<DutyDate[]> {
+    return invokeRoster("duty_date_set_special_return", { scheduleId, dutyDate, value });
   }
 }

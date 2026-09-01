@@ -1,7 +1,7 @@
 # 财会系值班排班系统：数据模型
 
 > 文档版本：1.1  
-> 状态：开发基线；模式版本 2 已落地（Phase 1 done，2026-09-02）
+> 状态：开发基线；模式版本 3 已落地（Phase 2 done，2026-09-02）
 > 关联文档：[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[PRD.md](./PRD.md)、[TASKS.md](./TASKS.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
 ## 1. 建模原则
@@ -41,12 +41,7 @@ type DepartmentMode = "NONE" | "NORMAL" | "SPECIAL_MANUAL";
 type SpecialReturnSource = "AUTO" | "MANUAL" | "PENDING_CONFIRMATION" | null;
 type AssignmentSource = "MANUAL" | "AUTO";
 type DutyType =
-  | "NORMAL_DUTY"
-  | "BIG_DUTY"
-  | "HEAD_TEACHER_GROUP"
-  | "TERM_SPECIAL"
-  | "LEADER"
-  | "OTHER";
+  "NORMAL_DUTY" | "BIG_DUTY" | "HEAD_TEACHER_GROUP" | "TERM_SPECIAL" | "LEADER" | "OTHER";
 type Severity = "INFO" | "WARNING" | "ERROR";
 ```
 
@@ -56,77 +51,77 @@ type Severity = "INFO" | "WARNING" | "ERROR";
 
 ### 4.1 `teachers`：教师主档
 
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `id` | TEXT | PK | UUID。 |
-| `name` | TEXT | NOT NULL | 姓名；不以姓名作为主键。 |
-| `active` | INTEGER | NOT NULL DEFAULT 1 | 0 表示停用，不物理删除。 |
-| `note` | TEXT | NULL | 备注。 |
-| `created_at` | TEXT | NOT NULL | ISO 时间。 |
-| `updated_at` | TEXT | NOT NULL | ISO 时间。 |
+| 字段         | 类型    | 约束               | 说明                     |
+| ------------ | ------- | ------------------ | ------------------------ |
+| `id`         | TEXT    | PK                 | UUID。                   |
+| `name`       | TEXT    | NOT NULL           | 姓名；不以姓名作为主键。 |
+| `active`     | INTEGER | NOT NULL DEFAULT 1 | 0 表示停用，不物理删除。 |
+| `note`       | TEXT    | NULL               | 备注。                   |
+| `created_at` | TEXT    | NOT NULL           | ISO 时间。               |
+| `updated_at` | TEXT    | NOT NULL           | ISO 时间。               |
 
 姓名允许重名；界面必要时用内部编号或备注区分。
 
 ### 4.2 `semesters`：学期
 
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `id` | TEXT | PK | UUID。 |
-| `name` | TEXT | NOT NULL UNIQUE | 如“2026 春季学期”。 |
-| `start_date` | TEXT | NOT NULL | `YYYY-MM-DD`。 |
-| `end_date` | TEXT | NOT NULL | 不早于开始日期。 |
-| `status` | TEXT | NOT NULL | `ACTIVE` / `CLOSED`。 |
-| `created_at` | TEXT | NOT NULL | 创建时间。 |
-| `updated_at` | TEXT | NOT NULL | 更新时间。 |
+| 字段         | 类型 | 约束            | 说明                  |
+| ------------ | ---- | --------------- | --------------------- |
+| `id`         | TEXT | PK              | UUID。                |
+| `name`       | TEXT | NOT NULL UNIQUE | 如“2026 春季学期”。   |
+| `start_date` | TEXT | NOT NULL        | `YYYY-MM-DD`。        |
+| `end_date`   | TEXT | NOT NULL        | 不早于开始日期。      |
+| `status`     | TEXT | NOT NULL        | `ACTIVE` / `CLOSED`。 |
+| `created_at` | TEXT | NOT NULL        | 创建时间。            |
+| `updated_at` | TEXT | NOT NULL        | 更新时间。            |
 
 同一业务日期不得落入两个活动学期；关闭学期默认只读，重新打开需明确操作。
 
 ### 4.3 `semester_teachers`：学期教师快照
 
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `id` | TEXT | PK | UUID。 |
-| `semester_id` | TEXT | FK, NOT NULL | 所属学期。 |
-| `teacher_id` | TEXT | FK, NOT NULL | 教师。 |
-| `floor_group` | TEXT | CHECK | `LOWER` / `UPPER`。 |
-| `is_major_duty` | INTEGER | NOT NULL DEFAULT 0 | 是否属于大值班人员。 |
-| `participates` | INTEGER | NOT NULL DEFAULT 1 | 是否为该学期有效成员。 |
-| `initial_fairness_count` | INTEGER | NOT NULL DEFAULT 0, CHECK >= 0 | 公平基线。 |
-| `display_name_snapshot` | TEXT | NOT NULL | 历史显示快照。 |
-| `created_at` | TEXT | NOT NULL | 创建时间。 |
-| `updated_at` | TEXT | NOT NULL | 更新时间。 |
+| 字段                     | 类型    | 约束                           | 说明                   |
+| ------------------------ | ------- | ------------------------------ | ---------------------- |
+| `id`                     | TEXT    | PK                             | UUID。                 |
+| `semester_id`            | TEXT    | FK, NOT NULL                   | 所属学期。             |
+| `teacher_id`             | TEXT    | FK, NOT NULL                   | 教师。                 |
+| `floor_group`            | TEXT    | CHECK                          | `LOWER` / `UPPER`。    |
+| `is_major_duty`          | INTEGER | NOT NULL DEFAULT 0             | 是否属于大值班人员。   |
+| `participates`           | INTEGER | NOT NULL DEFAULT 1             | 是否为该学期有效成员。 |
+| `initial_fairness_count` | INTEGER | NOT NULL DEFAULT 0, CHECK >= 0 | 公平基线。             |
+| `display_name_snapshot`  | TEXT    | NOT NULL                       | 历史显示快照。         |
+| `created_at`             | TEXT    | NOT NULL                       | 创建时间。             |
+| `updated_at`             | TEXT    | NOT NULL                       | 更新时间。             |
 
 唯一约束：`UNIQUE(semester_id, teacher_id)`。
 
 ### 4.4 `monthly_schedules`：月排班
 
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `id` | TEXT | PK | UUID。 |
-| `semester_id` | TEXT | FK, NOT NULL | 所属学期。 |
-| `year_month` | TEXT | NOT NULL | `YYYY-MM`。 |
-| `status` | TEXT | NOT NULL DEFAULT `DRAFT` | 草稿/已确认。 |
-| `generation_revision` | INTEGER | NOT NULL DEFAULT 0 | 每次重新生成加 1。 |
-| `input_fingerprint` | TEXT | NULL | 最近一次生成输入指纹。 |
-| `confirmed_at` | TEXT | NULL | 确认时间。 |
-| `created_at` | TEXT | NOT NULL | 创建时间。 |
-| `updated_at` | TEXT | NOT NULL | 更新时间。 |
+| 字段                  | 类型    | 约束                     | 说明                   |
+| --------------------- | ------- | ------------------------ | ---------------------- |
+| `id`                  | TEXT    | PK                       | UUID。                 |
+| `semester_id`         | TEXT    | FK, NOT NULL             | 所属学期。             |
+| `year_month`          | TEXT    | NOT NULL                 | `YYYY-MM`。            |
+| `status`              | TEXT    | NOT NULL DEFAULT `DRAFT` | 草稿/已确认。          |
+| `generation_revision` | INTEGER | NOT NULL DEFAULT 0       | 每次重新生成加 1。     |
+| `input_fingerprint`   | TEXT    | NULL                     | 最近一次生成输入指纹。 |
+| `confirmed_at`        | TEXT    | NULL                     | 确认时间。             |
+| `created_at`          | TEXT    | NOT NULL                 | 创建时间。             |
+| `updated_at`          | TEXT    | NOT NULL                 | 更新时间。             |
 
 唯一约束：`UNIQUE(semester_id, year_month)`。年月必须落在学期覆盖范围内。
 
 ### 4.5 `duty_dates`：日期配置
 
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `id` | TEXT | PK | UUID。 |
-| `schedule_id` | TEXT | FK, NOT NULL | 月排班。 |
-| `duty_date` | TEXT | NOT NULL | `YYYY-MM-DD`。 |
-| `department_mode` | TEXT | NOT NULL | `NONE` / `NORMAL` / `SPECIAL_MANUAL`。 |
-| `is_special_return` | INTEGER | NULL | 1/0；待确认时允许 NULL。 |
-| `special_return_source` | TEXT | NULL | 自动、人工或待确认。 |
-| `note` | TEXT | NULL | 日期说明。 |
-| `created_at` | TEXT | NOT NULL | 创建时间。 |
-| `updated_at` | TEXT | NOT NULL | 更新时间。 |
+| 字段                    | 类型    | 约束         | 说明                                   |
+| ----------------------- | ------- | ------------ | -------------------------------------- |
+| `id`                    | TEXT    | PK           | UUID。                                 |
+| `schedule_id`           | TEXT    | FK, NOT NULL | 月排班。                               |
+| `duty_date`             | TEXT    | NOT NULL     | `YYYY-MM-DD`。                         |
+| `department_mode`       | TEXT    | NOT NULL     | `NONE` / `NORMAL` / `SPECIAL_MANUAL`。 |
+| `is_special_return`     | INTEGER | NULL         | 1/0；待确认时允许 NULL。               |
+| `special_return_source` | TEXT    | NULL         | 自动、人工或待确认。                   |
+| `note`                  | TEXT    | NULL         | 日期说明。                             |
+| `created_at`            | TEXT    | NOT NULL     | 创建时间。                             |
+| `updated_at`            | TEXT    | NOT NULL     | 更新时间。                             |
 
 唯一约束：`UNIQUE(schedule_id, duty_date)`。
 
@@ -136,22 +131,22 @@ type Severity = "INFO" | "WARNING" | "ERROR";
 
 ### 4.6 `assignments`：统一值班账本
 
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `id` | TEXT | PK | UUID。 |
-| `schedule_id` | TEXT | FK, NOT NULL | 冗余用于月度查询和事务边界。 |
-| `duty_date_id` | TEXT | FK, NOT NULL | 日期。 |
-| `teacher_id` | TEXT | FK, NOT NULL | 教师。 |
-| `semester_teacher_id` | TEXT | FK, NOT NULL | 使用当时学期快照。 |
-| `duty_type` | TEXT | NOT NULL | 业务类型。 |
-| `source` | TEXT | NOT NULL | `MANUAL` / `AUTO`。 |
-| `locked` | INTEGER | NOT NULL | 人工默认 1，自动默认 0。 |
-| `occupies_department_slot` | INTEGER | NOT NULL | 是否填充普通系部岗位。 |
-| `slot_floor` | TEXT | NULL | 占岗位时为 `LOWER` / `UPPER`。 |
-| `explanation_json` | TEXT | NULL | 自动决策快照；JSON。 |
-| `note` | TEXT | NULL | 人工说明。 |
-| `created_at` | TEXT | NOT NULL | 创建时间。 |
-| `updated_at` | TEXT | NOT NULL | 更新时间。 |
+| 字段                       | 类型    | 约束         | 说明                           |
+| -------------------------- | ------- | ------------ | ------------------------------ |
+| `id`                       | TEXT    | PK           | UUID。                         |
+| `schedule_id`              | TEXT    | FK, NOT NULL | 冗余用于月度查询和事务边界。   |
+| `duty_date_id`             | TEXT    | FK, NOT NULL | 日期。                         |
+| `teacher_id`               | TEXT    | FK, NOT NULL | 教师。                         |
+| `semester_teacher_id`      | TEXT    | FK, NOT NULL | 使用当时学期快照。             |
+| `duty_type`                | TEXT    | NOT NULL     | 业务类型。                     |
+| `source`                   | TEXT    | NOT NULL     | `MANUAL` / `AUTO`。            |
+| `locked`                   | INTEGER | NOT NULL     | 人工默认 1，自动默认 0。       |
+| `occupies_department_slot` | INTEGER | NOT NULL     | 是否填充普通系部岗位。         |
+| `slot_floor`               | TEXT    | NULL         | 占岗位时为 `LOWER` / `UPPER`。 |
+| `explanation_json`         | TEXT    | NULL         | 自动决策快照；JSON。           |
+| `note`                     | TEXT    | NULL         | 人工说明。                     |
+| `created_at`               | TEXT    | NOT NULL     | 创建时间。                     |
+| `updated_at`               | TEXT    | NOT NULL     | 更新时间。                     |
 
 关键约束：
 
@@ -169,13 +164,13 @@ CHECK(
 
 ### 4.7 `monthly_exclusions`：月度排除
 
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `id` | TEXT | PK | UUID。 |
-| `schedule_id` | TEXT | FK, NOT NULL | 目标月份。 |
-| `teacher_id` | TEXT | FK, NOT NULL | 教师。 |
-| `reason` | TEXT | NULL | 自由文本，不建立“孕期”等敏感枚举。 |
-| `created_at` | TEXT | NOT NULL | 创建时间。 |
+| 字段          | 类型 | 约束         | 说明                               |
+| ------------- | ---- | ------------ | ---------------------------------- |
+| `id`          | TEXT | PK           | UUID。                             |
+| `schedule_id` | TEXT | FK, NOT NULL | 目标月份。                         |
+| `teacher_id`  | TEXT | FK, NOT NULL | 教师。                             |
+| `reason`      | TEXT | NULL         | 自由文本，不建立“孕期”等敏感枚举。 |
+| `created_at`  | TEXT | NOT NULL     | 创建时间。                         |
 
 唯一约束：`UNIQUE(schedule_id, teacher_id)`。
 
@@ -183,18 +178,20 @@ CHECK(
 
 `schema_migrations` 记录迁移版本，禁止运行时临时改表。`app_settings` 仅保存界面偏好、默认导出路径等非业务事实；当前学期可以保存为偏好，但业务查询不得依赖它代替外键。
 
-**Phase 0–1 已落地（最新模式版本 2）：**
+**Phase 0–2 已落地（最新模式版本 3）：**
 
-| 表 | 状态 | 说明 |
-|---|---|---|
-| `schema_migrations` | 已实现 | `version` PK、`name` UNIQUE、`applied_at`。空库迁到 1；重复启动不重复插入。 |
-| `app_settings` | 已建表 | `key` PK、`value`、`updated_at`。尚无业务读写。 |
-| `probe_events` | 开发探针 | 仅验证重启持久化，**不是**值班账本，Phase 1 不得当教师/排班表使用。 |
-| `teachers` | 已实现 | 教师主档；UUID 主键，支持停用/恢复，重名不作为关联键。 |
-| `semesters` | 已实现 | 学期新建、选择、关闭/重开；合法日期与活动学期重叠在命令层校验。 |
-| `semester_teachers` | 已实现 | 学期成员快照、楼层、大值班、参与状态与非负公平基线。 |
+| 表                  | 状态     | 说明                                                                        |
+| ------------------- | -------- | --------------------------------------------------------------------------- |
+| `schema_migrations` | 已实现   | `version` PK、`name` UNIQUE、`applied_at`。空库迁到 1；重复启动不重复插入。 |
+| `app_settings`      | 已建表   | `key` PK、`value`、`updated_at`。尚无业务读写。                             |
+| `probe_events`      | 开发探针 | 仅验证重启持久化，**不是**值班账本，Phase 1 不得当教师/排班表使用。         |
+| `teachers`          | 已实现   | 教师主档；UUID 主键，支持停用/恢复，重名不作为关联键。                      |
+| `semesters`         | 已实现   | 学期新建、选择、关闭/重开；合法日期与活动学期重叠在命令层校验。             |
+| `semester_teachers` | 已实现   | 学期成员快照、楼层、大值班、参与状态与非负公平基线。                        |
+| `monthly_schedules` | 已实现   | 学期内年月唯一；草稿/确认、确认时间和后续生成元数据已落地。                 |
+| `duty_dates`        | 已实现   | 日期类型、返校标记及 `AUTO` / `MANUAL` / `PENDING_CONFIRMATION` 来源。      |
 
-迁移 `002_teachers_semesters.sql` 已添加前三张业务表；`monthly_schedules` 及后续账本表仍待 Phase 2–3。数据库文件：macOS 开发/安装后位于 `~/Library/Application Support/com.caihui.duty-roster/duty-roster.db`。启动时开启 `foreign_keys` 与 WAL，并执行 `PRAGMA integrity_check`。
+迁移 `003_monthly_schedules.sql` 已添加月份与日期表；`assignments`、`monthly_exclusions` 仍待 Phase 3。月份必须与学期范围相交，日期必须同时落在月份和学期内；返校来源与可空布尔值由数据库约束保持一致。数据库文件：macOS 开发/安装后位于 `~/Library/Application Support/com.caihui.duty-roster/duty-roster.db`。启动时开启 `foreign_keys` 与 WAL，并执行 `PRAGMA integrity_check`。
 
 ## 5. 派生视图与查询口径
 

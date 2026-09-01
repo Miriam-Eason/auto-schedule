@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
-const LATEST_SCHEMA_VERSION: i32 = 2;
+const LATEST_SCHEMA_VERSION: i32 = 3;
 
 struct Migration {
     version: i32,
@@ -25,6 +25,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 2,
         name: "teachers_semesters",
         sql: include_str!("../migrations/002_teachers_semesters.sql"),
+    },
+    Migration {
+        version: 3,
+        name: "monthly_schedules",
+        sql: include_str!("../migrations/003_monthly_schedules.sql"),
     },
 ];
 
@@ -134,6 +139,51 @@ pub struct ImportResult {
     pub created_teachers: i32,
     pub matched_teachers: i32,
     pub semester_members: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MonthlySchedule {
+    pub id: String,
+    pub semester_id: String,
+    pub year_month: String,
+    pub status: String,
+    pub generation_revision: i32,
+    pub input_fingerprint: Option<String>,
+    pub confirmed_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DutyDate {
+    pub id: String,
+    pub schedule_id: String,
+    pub duty_date: String,
+    pub department_mode: String,
+    pub is_special_return: Option<bool>,
+    pub special_return_source: String,
+    pub note: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMonthlyScheduleRequest {
+    pub id: String,
+    pub semester_id: String,
+    pub year_month: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveDutyDateRequest {
+    pub id: String,
+    pub schedule_id: String,
+    pub duty_date: String,
+    pub department_mode: String,
 }
 
 pub struct AppDb {
@@ -478,6 +528,199 @@ impl AppDb {
         })
     }
 
+    pub fn list_monthly_schedules(
+        &self,
+        semester_id: &str,
+    ) -> Result<Vec<MonthlySchedule>, AppError> {
+        let conn = self.lock()?;
+        query_semester(&conn, semester_id)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, semester_id, year_month, status, generation_revision,
+                    input_fingerprint, confirmed_at, created_at, updated_at
+             FROM monthly_schedules WHERE semester_id = ?1
+             ORDER BY year_month ASC, id ASC",
+        )?;
+        let rows = stmt.query_map([semester_id], monthly_schedule_from_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn create_monthly_schedule(
+        &self,
+        request: &CreateMonthlyScheduleRequest,
+    ) -> Result<MonthlySchedule, AppError> {
+        validate_id(&request.id, "monthly schedule id")?;
+        validate_year_month(&request.year_month)?;
+        let mut conn = self.lock()?;
+        let tx = conn.transaction()?;
+        let semester = query_semester(&tx, &request.semester_id)?;
+        require_editable_semester(&tx, &request.semester_id)?;
+        if !month_overlaps_range(
+            &request.year_month,
+            &semester.start_date,
+            &semester.end_date,
+        ) {
+            return Err(AppError::Invalid(
+                "schedule month must overlap the semester date range".into(),
+            ));
+        }
+        tx.execute(
+            "INSERT INTO monthly_schedules
+             (id, semester_id, year_month, status, generation_revision, input_fingerprint,
+              confirmed_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'DRAFT', 0, NULL, NULL,
+                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            rusqlite::params![request.id, request.semester_id, request.year_month],
+        )?;
+        recompute_automatic_special_returns(&tx)?;
+        tx.commit()?;
+        query_monthly_schedule(&conn, &request.id)
+    }
+
+    pub fn list_duty_dates(&self, schedule_id: &str) -> Result<Vec<DutyDate>, AppError> {
+        let conn = self.lock()?;
+        query_monthly_schedule(&conn, schedule_id)?;
+        list_duty_dates_conn(&conn, schedule_id)
+    }
+
+    pub fn save_duty_date(&self, request: &SaveDutyDateRequest) -> Result<Vec<DutyDate>, AppError> {
+        validate_id(&request.id, "duty date id")?;
+        if request.department_mode != "NORMAL" && request.department_mode != "SPECIAL_MANUAL" {
+            return Err(AppError::Invalid(
+                "department mode must be NORMAL or SPECIAL_MANUAL".into(),
+            ));
+        }
+        if !is_valid_business_date(&request.duty_date) {
+            return Err(AppError::Invalid(
+                "duty date must be a valid YYYY-MM-DD date".into(),
+            ));
+        }
+        let mut conn = self.lock()?;
+        let tx = conn.transaction()?;
+        let schedule = require_editable_schedule(&tx, &request.schedule_id)?;
+        let semester = query_semester(&tx, &schedule.semester_id)?;
+        if !request.duty_date.starts_with(&schedule.year_month)
+            || request.duty_date.as_str() < semester.start_date.as_str()
+            || request.duty_date.as_str() > semester.end_date.as_str()
+        {
+            return Err(AppError::Invalid(
+                "duty date must belong to the schedule month and semester".into(),
+            ));
+        }
+        tx.execute(
+            "INSERT INTO duty_dates
+             (id, schedule_id, duty_date, department_mode, is_special_return,
+              special_return_source, note, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, NULL, 'PENDING_CONFIRMATION', NULL,
+                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             ON CONFLICT(schedule_id, duty_date) DO UPDATE SET
+               department_mode = excluded.department_mode,
+               updated_at = excluded.updated_at",
+            rusqlite::params![
+                request.id,
+                request.schedule_id,
+                request.duty_date,
+                request.department_mode
+            ],
+        )?;
+        recompute_automatic_special_returns(&tx)?;
+        tx.commit()?;
+        list_duty_dates_conn(&conn, &request.schedule_id)
+    }
+
+    pub fn delete_duty_date(
+        &self,
+        schedule_id: &str,
+        duty_date: &str,
+    ) -> Result<Vec<DutyDate>, AppError> {
+        if !is_valid_business_date(duty_date) {
+            return Err(AppError::Invalid("invalid duty date".into()));
+        }
+        let mut conn = self.lock()?;
+        let tx = conn.transaction()?;
+        require_editable_schedule(&tx, schedule_id)?;
+        let changed = tx.execute(
+            "DELETE FROM duty_dates WHERE schedule_id = ?1 AND duty_date = ?2",
+            rusqlite::params![schedule_id, duty_date],
+        )?;
+        if changed == 0 {
+            return Err(AppError::Invalid("duty date not found".into()));
+        }
+        recompute_automatic_special_returns(&tx)?;
+        tx.commit()?;
+        list_duty_dates_conn(&conn, schedule_id)
+    }
+
+    pub fn set_special_return(
+        &self,
+        schedule_id: &str,
+        duty_date: &str,
+        value: Option<bool>,
+    ) -> Result<Vec<DutyDate>, AppError> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction()?;
+        require_editable_schedule(&tx, schedule_id)?;
+        let changed = match value {
+            Some(value) => tx.execute(
+                "UPDATE duty_dates SET is_special_return = ?3,
+                 special_return_source = 'MANUAL',
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                 WHERE schedule_id = ?1 AND duty_date = ?2 AND department_mode <> 'NONE'",
+                rusqlite::params![schedule_id, duty_date, value],
+            )?,
+            None => tx.execute(
+                "UPDATE duty_dates SET is_special_return = NULL,
+                 special_return_source = 'PENDING_CONFIRMATION',
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                 WHERE schedule_id = ?1 AND duty_date = ?2 AND department_mode <> 'NONE'",
+                rusqlite::params![schedule_id, duty_date],
+            )?,
+        };
+        if changed == 0 {
+            return Err(AppError::Invalid("department duty date not found".into()));
+        }
+        recompute_automatic_special_returns(&tx)?;
+        tx.commit()?;
+        list_duty_dates_conn(&conn, schedule_id)
+    }
+
+    pub fn set_monthly_schedule_status(
+        &self,
+        id: &str,
+        status: &str,
+    ) -> Result<MonthlySchedule, AppError> {
+        if status != "DRAFT" && status != "CONFIRMED" {
+            return Err(AppError::Invalid(
+                "schedule status must be DRAFT or CONFIRMED".into(),
+            ));
+        }
+        let conn = self.lock()?;
+        let schedule = query_monthly_schedule(&conn, id)?;
+        require_editable_semester(&conn, &schedule.semester_id)?;
+        if status == "CONFIRMED" {
+            let pending: i32 = conn.query_row(
+                "SELECT COUNT(*) FROM duty_dates
+                 WHERE schedule_id = ?1 AND special_return_source = 'PENDING_CONFIRMATION'",
+                [id],
+                |row| row.get(0),
+            )?;
+            if pending > 0 {
+                return Err(AppError::Invalid(
+                    "resolve pending special-return dates before confirming the month".into(),
+                ));
+            }
+        }
+        conn.execute(
+            "UPDATE monthly_schedules SET status = ?2,
+             confirmed_at = CASE WHEN ?2 = 'CONFIRMED'
+                 THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE NULL END,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+            rusqlite::params![id, status],
+        )?;
+        query_monthly_schedule(&conn, id)
+    }
+
     fn get_semester_teacher(
         &self,
         semester_id: &str,
@@ -564,6 +807,142 @@ fn query_teacher(conn: &Connection, id: &str) -> Result<Teacher, AppError> {
     .ok_or_else(|| AppError::Invalid("teacher not found".into()))
 }
 
+fn monthly_schedule_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MonthlySchedule> {
+    Ok(MonthlySchedule {
+        id: row.get(0)?,
+        semester_id: row.get(1)?,
+        year_month: row.get(2)?,
+        status: row.get(3)?,
+        generation_revision: row.get(4)?,
+        input_fingerprint: row.get(5)?,
+        confirmed_at: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+    })
+}
+
+fn duty_date_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DutyDate> {
+    Ok(DutyDate {
+        id: row.get(0)?,
+        schedule_id: row.get(1)?,
+        duty_date: row.get(2)?,
+        department_mode: row.get(3)?,
+        is_special_return: row.get(4)?,
+        special_return_source: row.get(5)?,
+        note: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+    })
+}
+
+fn query_monthly_schedule(conn: &Connection, id: &str) -> Result<MonthlySchedule, AppError> {
+    conn.query_row(
+        "SELECT id, semester_id, year_month, status, generation_revision,
+                input_fingerprint, confirmed_at, created_at, updated_at
+         FROM monthly_schedules WHERE id = ?1",
+        [id],
+        monthly_schedule_from_row,
+    )
+    .optional()?
+    .ok_or_else(|| AppError::Invalid("monthly schedule not found".into()))
+}
+
+fn list_duty_dates_conn(conn: &Connection, schedule_id: &str) -> Result<Vec<DutyDate>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, schedule_id, duty_date, department_mode, is_special_return,
+                special_return_source, note, created_at, updated_at
+         FROM duty_dates WHERE schedule_id = ?1 ORDER BY duty_date ASC, id ASC",
+    )?;
+    let rows = stmt.query_map([schedule_id], duty_date_from_row)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+fn require_editable_schedule(conn: &Connection, id: &str) -> Result<MonthlySchedule, AppError> {
+    let schedule = query_monthly_schedule(conn, id)?;
+    require_editable_semester(conn, &schedule.semester_id)?;
+    if schedule.status != "DRAFT" {
+        return Err(AppError::Invalid(
+            "confirmed month is read-only; return it to draft before editing".into(),
+        ));
+    }
+    Ok(schedule)
+}
+
+fn recompute_automatic_special_returns(conn: &Connection) -> Result<(), AppError> {
+    let candidates = {
+        let mut stmt = conn.prepare(
+            "SELECT dd.id, dd.duty_date, ms.semester_id, s.start_date
+             FROM duty_dates dd
+             JOIN monthly_schedules ms ON ms.id = dd.schedule_id
+             JOIN semesters s ON s.id = ms.semester_id
+             WHERE dd.department_mode <> 'NONE'
+               AND dd.special_return_source <> 'MANUAL'
+               AND ms.status = 'DRAFT'
+             ORDER BY dd.duty_date ASC, dd.id ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+
+    for (id, duty_date, semester_id, semester_start) in candidates {
+        let previous = previous_business_date(&duty_date)?;
+        let previous_is_duty: bool = conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM duty_dates dd
+                JOIN monthly_schedules ms ON ms.id = dd.schedule_id
+                WHERE ms.semester_id = ?1 AND dd.duty_date = ?2
+                  AND dd.department_mode <> 'NONE'
+             )",
+            rusqlite::params![&semester_id, &previous],
+            |row| row.get(0),
+        )?;
+        let history_known = if previous < semester_start {
+            true
+        } else {
+            let previous_month = &previous[0..7];
+            conn.query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM monthly_schedules
+                    WHERE semester_id = ?1 AND year_month = ?2
+                 )",
+                rusqlite::params![&semester_id, previous_month],
+                |row| row.get::<_, bool>(0),
+            )?
+        };
+
+        if previous_is_duty {
+            conn.execute(
+                "UPDATE duty_dates SET is_special_return = 0,
+                 special_return_source = 'AUTO',
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+                [&id],
+            )?;
+        } else if history_known {
+            conn.execute(
+                "UPDATE duty_dates SET is_special_return = 1,
+                 special_return_source = 'AUTO',
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+                [&id],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE duty_dates SET is_special_return = NULL,
+                 special_return_source = 'PENDING_CONFIRMATION',
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+                [&id],
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn required_text<'a>(value: &'a str, label: &str) -> Result<&'a str, AppError> {
     let value = value.trim();
     if value.is_empty() {
@@ -637,6 +1016,60 @@ fn validate_date_range(start: &str, end: &str) -> Result<(), AppError> {
         ));
     }
     Ok(())
+}
+
+fn validate_year_month(value: &str) -> Result<(), AppError> {
+    if value.len() != 7 || value.as_bytes()[4] != b'-' {
+        return Err(AppError::Invalid("schedule month must use YYYY-MM".into()));
+    }
+    let candidate = format!("{value}-01");
+    if !is_valid_business_date(&candidate) {
+        return Err(AppError::Invalid(
+            "schedule month must use a valid YYYY-MM".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn month_overlaps_range(year_month: &str, start: &str, end: &str) -> bool {
+    let month_start = format!("{year_month}-01");
+    let year = year_month[0..4].parse::<i32>().expect("validated year");
+    let month = year_month[5..7].parse::<u32>().expect("validated month");
+    let month_end = format!("{year_month}-{:02}", days_in_month(year, month));
+    month_start.as_str() <= end && month_end.as_str() >= start
+}
+
+fn previous_business_date(value: &str) -> Result<String, AppError> {
+    if !is_valid_business_date(value) {
+        return Err(AppError::Invalid("invalid business date".into()));
+    }
+    let mut year = value[0..4].parse::<i32>().expect("validated year");
+    let mut month = value[5..7].parse::<u32>().expect("validated month");
+    let day = value[8..10].parse::<u32>().expect("validated day");
+    if day > 1 {
+        return Ok(format!("{year:04}-{month:02}-{:02}", day - 1));
+    }
+    if month == 1 {
+        year -= 1;
+        month = 12;
+    } else {
+        month -= 1;
+    }
+    Ok(format!(
+        "{year:04}-{month:02}-{:02}",
+        days_in_month(year, month)
+    ))
+}
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => 0,
+    }
 }
 
 fn is_valid_business_date(value: &str) -> bool {
@@ -834,7 +1267,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 2);
+        assert_eq!(count, 3);
     }
 
     #[test]
@@ -851,7 +1284,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 2);
+        assert_eq!(count, 3);
         assert_eq!(current_version(&conn).unwrap(), latest_schema_version());
     }
 
@@ -885,7 +1318,7 @@ mod tests {
         }
 
         let db = AppDb::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 2);
+        assert_eq!(db.schema_version().unwrap(), 3);
         assert_eq!(db.list_probe().unwrap()[0].message, "keep-me");
         let conn = db.lock().unwrap();
         let teacher_table: i32 = conn
@@ -954,6 +1387,32 @@ mod tests {
             is_major_duty: false,
             participates: true,
             initial_fairness_count: 0,
+        }
+    }
+
+    fn schedule_request(
+        id: &str,
+        semester_id: &str,
+        year_month: &str,
+    ) -> CreateMonthlyScheduleRequest {
+        CreateMonthlyScheduleRequest {
+            id: id.into(),
+            semester_id: semester_id.into(),
+            year_month: year_month.into(),
+        }
+    }
+
+    fn duty_date_request(
+        id: &str,
+        schedule_id: &str,
+        duty_date: &str,
+        department_mode: &str,
+    ) -> SaveDutyDateRequest {
+        SaveDutyDateRequest {
+            id: id.into(),
+            schedule_id: schedule_id.into(),
+            duty_date: duty_date.into(),
+            department_mode: department_mode.into(),
         }
     }
 
@@ -1081,5 +1540,149 @@ mod tests {
         assert!(db.import_teachers(&request).is_err());
         assert!(db.list_teachers().unwrap().is_empty());
         assert!(db.list_semester_teachers("s1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn monthly_schedule_must_overlap_semester_and_confirmed_month_is_read_only() {
+        let (_dir, db) = temp_db();
+        db.create_semester(&semester_request(
+            "s1",
+            "semester",
+            "2026-09-03",
+            "2027-01-15",
+        ))
+        .unwrap();
+        assert!(db
+            .create_monthly_schedule(&schedule_request("m0", "s1", "2026-08"))
+            .is_err());
+        let schedule = db
+            .create_monthly_schedule(&schedule_request("m1", "s1", "2026-09"))
+            .unwrap();
+        assert_eq!(schedule.status, "DRAFT");
+        db.save_duty_date(&duty_date_request("d1", "m1", "2026-09-03", "NORMAL"))
+            .unwrap();
+        let confirmed = db.set_monthly_schedule_status("m1", "CONFIRMED").unwrap();
+        assert!(confirmed.confirmed_at.is_some());
+        assert!(db
+            .save_duty_date(&duty_date_request("d2", "m1", "2026-09-04", "NORMAL",))
+            .is_err());
+        db.set_monthly_schedule_status("m1", "DRAFT").unwrap();
+        assert!(db
+            .save_duty_date(&duty_date_request("d2", "m1", "2026-09-04", "NORMAL",))
+            .is_ok());
+    }
+
+    #[test]
+    fn consecutive_days_and_cross_month_history_follow_r009_to_r011() {
+        let (_dir, db) = temp_db();
+        db.create_semester(&semester_request(
+            "s1",
+            "semester",
+            "2026-03-01",
+            "2026-07-31",
+        ))
+        .unwrap();
+        db.create_monthly_schedule(&schedule_request("march", "s1", "2026-03"))
+            .unwrap();
+        db.create_monthly_schedule(&schedule_request("april", "s1", "2026-04"))
+            .unwrap();
+
+        let april = db
+            .save_duty_date(&duty_date_request("apr-1", "april", "2026-04-01", "NORMAL"))
+            .unwrap();
+        assert_eq!(april[0].is_special_return, Some(true));
+
+        db.save_duty_date(&duty_date_request(
+            "mar-31",
+            "march",
+            "2026-03-31",
+            "NORMAL",
+        ))
+        .unwrap();
+        let april = db.list_duty_dates("april").unwrap();
+        assert_eq!(april[0].is_special_return, Some(false));
+        assert_eq!(april[0].special_return_source, "AUTO");
+
+        db.delete_duty_date("march", "2026-03-31").unwrap();
+        assert_eq!(
+            db.list_duty_dates("april").unwrap()[0].is_special_return,
+            Some(true)
+        );
+
+        db.save_duty_date(&duty_date_request("apr-2", "april", "2026-04-02", "NORMAL"))
+            .unwrap();
+        let dates = db.list_duty_dates("april").unwrap();
+        assert_eq!(dates[0].is_special_return, Some(true));
+        assert_eq!(dates[1].is_special_return, Some(false));
+    }
+
+    #[test]
+    fn missing_previous_month_is_pending_until_manually_resolved_or_history_exists() {
+        let (_dir, db) = temp_db();
+        db.create_semester(&semester_request(
+            "s1",
+            "semester",
+            "2026-08-01",
+            "2027-01-31",
+        ))
+        .unwrap();
+        db.create_monthly_schedule(&schedule_request("sep", "s1", "2026-09"))
+            .unwrap();
+        let dates = db
+            .save_duty_date(&duty_date_request(
+                "sep-1",
+                "sep",
+                "2026-09-01",
+                "SPECIAL_MANUAL",
+            ))
+            .unwrap();
+        assert_eq!(dates[0].is_special_return, None);
+        assert_eq!(dates[0].special_return_source, "PENDING_CONFIRMATION");
+        assert!(db.set_monthly_schedule_status("sep", "CONFIRMED").is_err());
+
+        let manual = db
+            .set_special_return("sep", "2026-09-01", Some(false))
+            .unwrap();
+        assert_eq!(manual[0].is_special_return, Some(false));
+        assert_eq!(manual[0].special_return_source, "MANUAL");
+        assert_eq!(manual[0].department_mode, "SPECIAL_MANUAL");
+
+        let pending = db.set_special_return("sep", "2026-09-01", None).unwrap();
+        assert_eq!(pending[0].is_special_return, None);
+        db.create_monthly_schedule(&schedule_request("aug", "s1", "2026-08"))
+            .unwrap();
+        let derived = db.list_duty_dates("sep").unwrap();
+        assert_eq!(derived[0].is_special_return, Some(true));
+        assert_eq!(derived[0].special_return_source, "AUTO");
+    }
+
+    #[test]
+    fn manual_special_return_override_survives_neighbor_changes_r013_r014() {
+        let (_dir, db) = temp_db();
+        db.create_semester(&semester_request(
+            "s1",
+            "semester",
+            "2026-09-01",
+            "2026-12-31",
+        ))
+        .unwrap();
+        db.create_monthly_schedule(&schedule_request("sep", "s1", "2026-09"))
+            .unwrap();
+        db.save_duty_date(&duty_date_request("d10", "sep", "2026-09-10", "NORMAL"))
+            .unwrap();
+        db.save_duty_date(&duty_date_request(
+            "d11",
+            "sep",
+            "2026-09-11",
+            "SPECIAL_MANUAL",
+        ))
+        .unwrap();
+        db.set_special_return("sep", "2026-09-11", Some(true))
+            .unwrap();
+        db.delete_duty_date("sep", "2026-09-10").unwrap();
+        let date = db.list_duty_dates("sep").unwrap().remove(0);
+        assert_eq!(date.department_mode, "SPECIAL_MANUAL");
+        assert_eq!(date.is_special_return, Some(true));
+        assert_eq!(date.special_return_source, "MANUAL");
     }
 }

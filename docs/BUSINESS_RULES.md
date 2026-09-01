@@ -1,7 +1,7 @@
 # 财会系值班排班系统：业务规则规格
 
 > 文档版本：1.1  
-> 状态：开发基线；规则正文未改。Phase 1 已实现并测试 R001–R004；R005–R050 按后续 Phase 实施
+> 状态：开发基线；规则正文未改。Phase 1 已实现并测试 R001–R004；Phase 2 已实现并测试 R009–R014，并落地 R042/R044 基础状态流；其余规则按后续 Phase 实施
 > 关联文档：[PRD.md](./PRD.md)、[DATA_MODEL.md](./DATA_MODEL.md)、[TASKS.md](./TASKS.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
 ## 1. 文档目的
@@ -14,19 +14,19 @@
 
 ## 2. 统一术语
 
-| 术语 | 定义 |
-|---|---|
-| 学期 | 一段连续统计周期，所有长期公平统计均限定在当前学期内。 |
-| 系部值班日 | 财会系需要安排值班的日期。 |
-| 普通值班日 | 采用“1–3 楼 1 人 + 4–5 楼 1 人”双岗位结构的系部值班日。 |
-| 集中值班日 | 开学、期末等不采用双岗位结构、由管理员人工指定任意人数的日期。 |
-| 特殊返校日 | 连续值班周期的首个值班日；系统默认识别，管理员可改写。它不是“集中值班日”的同义词。 |
-| 人工固定排班 | 管理员预先录入的任务，包括大值班、班主任集中值班、开学/期末、领导安排及其他任务。 |
-| 大值班 | 学校层面安排的固定值班；无论日期是否为系部值班日，均计入教师实际值班次数。 |
-| 月度排除 | 某教师在指定月份不参加自动排班；不等于停用，也不禁止管理员人工安排。 |
-| 第一轮/第二轮 | 当前月度值班次数最低为 0/1 的候选层。更一般地称“月度最低负担层”。 |
-| 初始公平次数 | 教师加入某学期时人为设置的公平基线，只参与公平排序，不伪造实际值班记录。 |
-| 草稿/已确认 | 月排班的编辑中/已发布状态。状态语义见 R042–R045。 |
+| 术语          | 定义                                                                               |
+| ------------- | ---------------------------------------------------------------------------------- |
+| 学期          | 一段连续统计周期，所有长期公平统计均限定在当前学期内。                             |
+| 系部值班日    | 财会系需要安排值班的日期。                                                         |
+| 普通值班日    | 采用“1–3 楼 1 人 + 4–5 楼 1 人”双岗位结构的系部值班日。                            |
+| 集中值班日    | 开学、期末等不采用双岗位结构、由管理员人工指定任意人数的日期。                     |
+| 特殊返校日    | 连续值班周期的首个值班日；系统默认识别，管理员可改写。它不是“集中值班日”的同义词。 |
+| 人工固定排班  | 管理员预先录入的任务，包括大值班、班主任集中值班、开学/期末、领导安排及其他任务。  |
+| 大值班        | 学校层面安排的固定值班；无论日期是否为系部值班日，均计入教师实际值班次数。         |
+| 月度排除      | 某教师在指定月份不参加自动排班；不等于停用，也不禁止管理员人工安排。               |
+| 第一轮/第二轮 | 当前月度值班次数最低为 0/1 的候选层。更一般地称“月度最低负担层”。                  |
+| 初始公平次数  | 教师加入某学期时人为设置的公平基线，只参与公平排序，不伪造实际值班记录。           |
+| 草稿/已确认   | 月排班的编辑中/已发布状态。状态语义见 R042–R045。                                  |
 
 ## 3. 约束与目标优先级
 
@@ -186,61 +186,62 @@ effectiveSemesterCount = initialFairnessCount + 本学期实际值班日期数
 
 ```ts
 function generateSchedule(input): Result {
-  validateInput(input)
-  ledger = buildLedger(input.history, input.manualAssignments)
-  vacancies = buildVacancies(input.dutyDays, input.manualAssignments)
-  vacancies.sort(bySpecialReturnThenScarcityThenDateAndFloor)
+  validateInput(input);
+  ledger = buildLedger(input.history, input.manualAssignments);
+  vacancies = buildVacancies(input.dutyDays, input.manualAssignments);
+  vacancies.sort(bySpecialReturnThenScarcityThenDateAndFloor);
 
   for (const slot of vacancies) {
-    let candidates = eligibleTeachers(slot, input)
-      .filter(t => !ledger.hasDutyOn(t.id, slot.date))
+    let candidates = eligibleTeachers(slot, input).filter(
+      (t) => !ledger.hasDutyOn(t.id, slot.date),
+    );
 
     if (candidates.length === 0) {
-      addError("NO_ELIGIBLE_CANDIDATE", slot)
-      continue
+      addError("NO_ELIGIBLE_CANDIDATE", slot);
+      continue;
     }
 
-    candidates = keepMinimum(candidates, t => ledger.monthCount(t.id))
+    candidates = keepMinimum(candidates, (t) => ledger.monthCount(t.id));
 
     if (slot.isSpecialReturn) {
-      candidates = keepMinimum(candidates, t => ledger.specialReturnCount(t.id))
+      candidates = keepMinimum(candidates, (t) => ledger.specialReturnCount(t.id));
     }
 
-    const nonAdjacent = candidates.filter(t => !ledger.hasAdjacentDuty(t.id, slot.date))
-    if (nonAdjacent.length > 0) candidates = nonAdjacent
-    else markRelaxation("ADJACENT_DUTY")
+    const nonAdjacent = candidates.filter((t) => !ledger.hasAdjacentDuty(t.id, slot.date));
+    if (nonAdjacent.length > 0) candidates = nonAdjacent;
+    else markRelaxation("ADJACENT_DUTY");
 
-    candidates = applyFloorTolerance(candidates, slot.floor, 1)
-    candidates.sort(byEffectiveSemesterCountThenLongestGapThenStableHash)
+    candidates = applyFloorTolerance(candidates, slot.floor, 1);
+    candidates.sort(byEffectiveSemesterCountThenLongestGapThenStableHash);
 
-    const selected = candidates[0]
-    assign(selected, slot, { source: "AUTO", explanation: snapshotDecision() })
-    ledger.add(selected, slot.date)
+    const selected = candidates[0];
+    assign(selected, slot, { source: "AUTO", explanation: snapshotDecision() });
+    ledger.add(selected, slot.date);
   }
 
-  return { assignments, warnings, explanations, statistics: ledger.summary() }
+  return { assignments, warnings, explanations, statistics: ledger.summary() };
 }
 ```
 
 ## 6. 必须覆盖的规则测试
 
-| 编号 | 场景 | 预期 |
-|---|---|---|
-| BR-T01 | 44 人、44 个空岗位、无人固定/排除 | 每人 1 次，不进入第二轮。 |
-| BR-T02 | 部分大值班在非系部日期 | 这些教师先计 1 次；容量不足时进入第二轮并解释。 |
-| BR-T03 | 大值班落在普通系部日 | 占所属楼层岗位，仅补另一岗位。 |
-| BR-T04 | 3 月 31 日与 4 月 1 日连续 | 4 月 1 日默认不是特殊返校日。 |
-| BR-T05 | 缺少前月数据 | 月首判断为待确认并警告。 |
-| BR-T06 | 特殊返校候选次数为 0/0/1/2 | 只从 0 次层选择。 |
-| BR-T07 | 本楼层最低 4、全体最低 3 | 保持本楼层。 |
-| BR-T08 | 本楼层最低 6、全体最低 3 | 允许跨楼层并解释。 |
-| BR-T09 | 唯一候选会连续两天 | 允许落位，产生黄色警告。 |
-| BR-T10 | 月度排除教师 | 不被自动选择；人工选择可保存并警告。 |
-| BR-T11 | 人工换人 | 其他自动岗位不变化，统计与警告实时刷新。 |
-| BR-T12 | 同一输入重复生成 | 自动结果完全一致。 |
-| BR-T13 | 初始公平次数为 3、实际为 1 | 实际显示 1，有效公平次数显示 4。 |
-| BR-T14 | 集中值班日人工安排 N 人 | 不生成双岗位，N 人均按人日计数。 |
-| BR-T15 | 有空缺时确认 | 阻止确认并定位空缺。 |
+| 编号   | 场景                              | 预期                                            |
+| ------ | --------------------------------- | ----------------------------------------------- |
+| BR-T01 | 44 人、44 个空岗位、无人固定/排除 | 每人 1 次，不进入第二轮。                       |
+| BR-T02 | 部分大值班在非系部日期            | 这些教师先计 1 次；容量不足时进入第二轮并解释。 |
+| BR-T03 | 大值班落在普通系部日              | 占所属楼层岗位，仅补另一岗位。                  |
+| BR-T04 | 3 月 31 日与 4 月 1 日连续        | 4 月 1 日默认不是特殊返校日。                   |
+| BR-T05 | 缺少前月数据                      | 月首判断为待确认并警告。                        |
+| BR-T06 | 特殊返校候选次数为 0/0/1/2        | 只从 0 次层选择。                               |
+| BR-T07 | 本楼层最低 4、全体最低 3          | 保持本楼层。                                    |
+| BR-T08 | 本楼层最低 6、全体最低 3          | 允许跨楼层并解释。                              |
+| BR-T09 | 唯一候选会连续两天                | 允许落位，产生黄色警告。                        |
+| BR-T10 | 月度排除教师                      | 不被自动选择；人工选择可保存并警告。            |
+| BR-T11 | 人工换人                          | 其他自动岗位不变化，统计与警告实时刷新。        |
+| BR-T12 | 同一输入重复生成                  | 自动结果完全一致。                              |
+| BR-T13 | 初始公平次数为 3、实际为 1        | 实际显示 1，有效公平次数显示 4。                |
+| BR-T14 | 集中值班日人工安排 N 人           | 不生成双岗位，N 人均按人日计数。                |
+| BR-T15 | 有空缺时确认                      | 阻止确认并定位空缺。                            |
 
 ## 7. 变更纪律
 

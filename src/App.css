@@ -269,6 +269,159 @@ button.secondary {
   background: #e8f0f4;
 }
 
+button.danger {
+  color: #8b2f2f;
+  background: #fae9e9;
+}
+
+.status-chip.draft {
+  color: #73551f;
+  background: #f7edd6;
+}
+
+.status-chip.confirmed {
+  color: #24613d;
+  background: #e2f3e8;
+}
+
+.inline-notice {
+  margin: 0 0 16px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #345363;
+  background: #eef7fb;
+}
+
+.month-toolbar,
+.create-month,
+.calendar-status,
+.date-editor,
+.date-actions {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+}
+
+.month-toolbar {
+  justify-content: space-between;
+  padding-bottom: 16px;
+}
+
+.month-toolbar label,
+.create-month label {
+  display: grid;
+  gap: 6px;
+  color: #526978;
+  font-size: 12px;
+}
+
+.calendar-status {
+  align-items: center;
+  border-top: 1px solid #edf1f4;
+  padding: 14px 0;
+  color: #61788a;
+  font-size: 13px;
+}
+
+.calendar-status strong {
+  margin-left: auto;
+  color: #8a5a16;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.weekday-row {
+  margin-bottom: 6px;
+  color: #718592;
+  font-size: 12px;
+  text-align: center;
+}
+
+.calendar-day,
+.calendar-empty {
+  min-height: 92px;
+}
+
+.calendar-day {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  border: 1px solid #dce3ea;
+  padding: 9px;
+  color: #334e5e;
+  background: #fff;
+  text-align: left;
+}
+
+.calendar-day:hover:not(:disabled) {
+  border-color: #79a9bf;
+}
+
+.calendar-day.has-duty {
+  border-color: #a8cbd9;
+  background: #f0f8fb;
+}
+
+.calendar-day.selected {
+  box-shadow: 0 0 0 2px #2f6f8f;
+}
+
+.calendar-day:disabled {
+  color: #9aa8b1;
+  background: #f4f6f8;
+}
+
+.calendar-day .day-number {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.calendar-day strong {
+  font-size: 12px;
+}
+
+.calendar-day small {
+  color: #607887;
+  font-size: 11px;
+}
+
+.date-editor {
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-top: 14px;
+  border-radius: 10px;
+  padding: 14px;
+  background: #f6f8fa;
+}
+
+.date-editor > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 180px;
+}
+
+.date-editor span,
+.calendar-hint {
+  color: #61788a;
+  font-size: 13px;
+}
+
+.date-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.date-actions button,
+.date-actions select {
+  font-size: 13px;
+}
+
 .search {
   min-width: 230px;
 }
@@ -399,7 +552,9 @@ td small {
   .section-heading,
   .semester-controls,
   .semester-summary,
-  .preview-summary {
+  .preview-summary,
+  .month-toolbar,
+  .date-editor {
     align-items: stretch;
     flex-direction: column;
   }
@@ -411,5 +566,22 @@ td small {
   .search {
     min-width: 0;
     width: 100%;
+  }
+
+  .calendar-grid {
+    gap: 3px;
+  }
+
+  .calendar-day,
+  .calendar-empty {
+    min-height: 76px;
+  }
+
+  .calendar-day {
+    padding: 6px;
+  }
+
+  .date-actions {
+    justify-content: flex-start;
   }
 }

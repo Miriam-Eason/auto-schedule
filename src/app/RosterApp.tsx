@@ -14,6 +14,7 @@ import type {
   SemesterTeacher,
   Teacher,
 } from "../repositories/types";
+import { MonthlyCalendar } from "./MonthlyCalendar";
 
 interface RosterAppProps {
   repository: RosterRepository;
@@ -123,7 +124,22 @@ export function RosterApp({ repository }: RosterAppProps) {
     if (!selectedSemester) return;
     const next = selectedSemester.status === "ACTIVE" ? "CLOSED" : "ACTIVE";
     const verb = next === "CLOSED" ? "关闭" : "重新打开";
-    if (!window.confirm(`${verb}“${selectedSemester.name}”？关闭后该学期默认为只读。`)) return;
+    let draftCount = 0;
+    try {
+      const schedules =
+        next === "CLOSED" ? await repository.listMonthlySchedules(selectedSemester.id) : [];
+      draftCount = schedules.filter((schedule) => schedule.status === "DRAFT").length;
+    } catch (error) {
+      setNotice(errorMessage(error));
+      return;
+    }
+    const draftNotice = draftCount > 0 ? `当前还有 ${draftCount} 个草稿月份。` : "";
+    if (
+      !window.confirm(
+        `${verb}“${selectedSemester.name}”？${draftNotice}关闭后该学期与月份默认为只读。`,
+      )
+    )
+      return;
     await run(async () => {
       await repository.setSemesterStatus(selectedSemester.id, next);
       await refresh(selectedSemester.id);
@@ -134,13 +150,13 @@ export function RosterApp({ repository }: RosterAppProps) {
     <main className="workspace">
       <header className="workspace-header">
         <div>
-          <p className="eyebrow">教师与学期</p>
+          <p className="eyebrow">月份与日期规则</p>
           <h1>财会系值班排班</h1>
           <p className="lede">
-            先建立学期成员快照，再进入月份和排班。当前页面不会创建任何值班记录。
+            建立月份、选择系部值班日并确认跨月特殊返校；当前阶段不会安排任何教师。
           </p>
         </div>
-        <span className="phase-badge">Phase 1</span>
+        <span className="phase-badge">Phase 2</span>
       </header>
 
       {notice ? (
@@ -205,6 +221,7 @@ export function RosterApp({ repository }: RosterAppProps) {
 
       {selectedSemester ? (
         <>
+          <MonthlyCalendar semester={selectedSemester} repository={repository} />
           <TeacherManager
             semester={selectedSemester}
             members={visibleMembers}

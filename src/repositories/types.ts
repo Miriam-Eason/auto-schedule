@@ -31,6 +31,9 @@ export interface ProbeRepository {
 
 export type FloorGroup = "LOWER" | "UPPER";
 export type SemesterStatus = "ACTIVE" | "CLOSED";
+export type ScheduleStatus = "DRAFT" | "CONFIRMED";
+export type DepartmentMode = "NORMAL" | "SPECIAL_MANUAL";
+export type SpecialReturnSource = "AUTO" | "MANUAL" | "PENDING_CONFIRMATION";
 
 export interface Semester {
   id: string;
@@ -107,6 +110,43 @@ export interface ImportResult {
   semesterMembers: number;
 }
 
+export interface MonthlySchedule {
+  id: string;
+  semesterId: string;
+  yearMonth: string;
+  status: ScheduleStatus;
+  generationRevision: number;
+  inputFingerprint: string | null;
+  confirmedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DutyDate {
+  id: string;
+  scheduleId: string;
+  dutyDate: string;
+  departmentMode: DepartmentMode;
+  isSpecialReturn: boolean | null;
+  specialReturnSource: SpecialReturnSource;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateMonthlyScheduleRequest {
+  id: string;
+  semesterId: string;
+  yearMonth: string;
+}
+
+export interface SaveDutyDateRequest {
+  id: string;
+  scheduleId: string;
+  dutyDate: string;
+  departmentMode: DepartmentMode;
+}
+
 export interface RosterRepository {
   listSemesters(): Promise<Semester[]>;
   createSemester(request: CreateSemesterRequest): Promise<Semester>;
@@ -118,4 +158,15 @@ export interface RosterRepository {
   saveTeacher(request: SaveTeacherRequest): Promise<SemesterTeacher>;
   setTeacherActive(id: string, active: boolean): Promise<Teacher>;
   importTeachers(request: ImportTeachersRequest): Promise<ImportResult>;
+  listMonthlySchedules(semesterId: string): Promise<MonthlySchedule[]>;
+  createMonthlySchedule(request: CreateMonthlyScheduleRequest): Promise<MonthlySchedule>;
+  setMonthlyScheduleStatus(id: string, status: ScheduleStatus): Promise<MonthlySchedule>;
+  listDutyDates(scheduleId: string): Promise<DutyDate[]>;
+  saveDutyDate(request: SaveDutyDateRequest): Promise<DutyDate[]>;
+  deleteDutyDate(scheduleId: string, dutyDate: string): Promise<DutyDate[]>;
+  setSpecialReturn(
+    scheduleId: string,
+    dutyDate: string,
+    value: boolean | null,
+  ): Promise<DutyDate[]>;
 }
