@@ -6,7 +6,9 @@ import type {
   MonthlySchedule,
   RosterRepository,
   Semester,
+  SemesterTeacher,
 } from "../repositories/types";
+import { ManualRosterPanel } from "./ManualRosterPanel";
 
 const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
 
@@ -38,9 +40,13 @@ function sourceLabel(date: DutyDate): string {
 export function MonthlyCalendar({
   semester,
   repository,
+  members,
+  onLedgerChanged,
 }: {
   semester: Semester;
   repository: RosterRepository;
+  members: SemesterTeacher[];
+  onLedgerChanged: () => Promise<void>;
 }) {
   const [schedules, setSchedules] = useState<MonthlySchedule[]>([]);
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
@@ -51,11 +57,18 @@ export function MonthlyCalendar({
   const [notice, setNotice] = useState<string | null>(null);
 
   const schedule = schedules.find((item) => item.id === selectedScheduleId) ?? null;
-  const dateByValue = useMemo(() => new Map(dates.map((date) => [date.dutyDate, date])), [dates]);
+  const departmentDates = useMemo(
+    () => dates.filter((date) => date.departmentMode !== "NONE"),
+    [dates],
+  );
+  const dateByValue = useMemo(
+    () => new Map(departmentDates.map((date) => [date.dutyDate, date])),
+    [departmentDates],
+  );
   const selectedDutyDate = selectedDate ? (dateByValue.get(selectedDate) ?? null) : null;
   const cells = useMemo(() => (schedule ? calendarDates(schedule.yearMonth) : []), [schedule]);
   const editable = semester.status === "ACTIVE" && schedule?.status === "DRAFT";
-  const pendingCount = dates.filter(
+  const pendingCount = departmentDates.filter(
     (date) => date.specialReturnSource === "PENDING_CONFIRMATION",
   ).length;
 
@@ -143,6 +156,12 @@ export function MonthlyCalendar({
 
   async function removeDate() {
     if (!schedule || !selectedDate) return;
+    if (
+      !window.confirm(
+        `取消 ${selectedDate} 的系部值班日？该日期已有的人工值班会随日期一并删除并重算统计。`,
+      )
+    )
+      return;
     await run(async () => {
       setDates(await repository.deleteDutyDate(schedule.id, selectedDate));
       await load(schedule.id);
@@ -251,7 +270,7 @@ export function MonthlyCalendar({
             <span className={`status-chip ${schedule.status.toLowerCase()}`}>
               {schedule.status === "DRAFT" ? "草稿可编辑" : "已确认只读"}
             </span>
-            <span>{dates.length} 个系部值班日</span>
+            <span>{departmentDates.length} 个系部值班日</span>
             {pendingCount > 0 ? (
               <strong>{pendingCount} 个返校标记待确认，当前不能确认月份</strong>
             ) : null}
@@ -363,6 +382,18 @@ export function MonthlyCalendar({
           ) : (
             <p className="calendar-hint">选择一个日期以新增、改类型或确认特殊返校标记。</p>
           )}
+          <ManualRosterPanel
+            schedule={schedule}
+            dates={dates}
+            members={members}
+            selectedDate={selectedDate}
+            editable={Boolean(editable)}
+            repository={repository}
+            onLedgerChanged={async () => {
+              await load(schedule.id);
+              await onLedgerChanged();
+            }}
+          />
         </>
       ) : (
         <p className="empty-row">先创建学期范围内的月份，再在月历中选择系部值班日。</p>

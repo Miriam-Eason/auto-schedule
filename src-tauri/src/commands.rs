@@ -1,9 +1,10 @@
 use tauri::State;
 
 use crate::db::{
-    AppDb, CreateMonthlyScheduleRequest, CreateSemesterRequest, DatabaseInfo, DutyDate,
-    ImportResult, ImportTeachersRequest, MonthlySchedule, ProbeEvent, SaveDutyDateRequest,
-    SaveTeacherRequest, Semester, SemesterTeacherView, Teacher,
+    AppDb, AssignmentView, CreateMonthlyScheduleRequest, CreateSemesterRequest, DatabaseInfo,
+    DutyDate, ImportResult, ImportTeachersRequest, MonthlyExclusionView, MonthlySchedule,
+    ProbeEvent, SaveDutyDateRequest, SaveManualAssignmentRequest, SaveMonthlyExclusionRequest,
+    SaveTeacherRequest, Semester, SemesterTeacherView, Teacher, TeacherDutyStatistics,
 };
 use crate::error::AppError;
 
@@ -144,4 +145,62 @@ pub fn duty_date_set_special_return(
     value: Option<bool>,
 ) -> Result<Vec<DutyDate>, AppError> {
     db.set_special_return(&schedule_id, &duty_date, value)
+}
+
+#[tauri::command]
+pub fn assignment_list(
+    db: State<AppDb>,
+    schedule_id: String,
+) -> Result<Vec<AssignmentView>, AppError> {
+    db.list_assignments(&schedule_id)
+}
+
+#[tauri::command]
+pub fn assignment_save_manual(
+    db: State<AppDb>,
+    request: SaveManualAssignmentRequest,
+) -> Result<Vec<AssignmentView>, AppError> {
+    db.save_manual_assignment(&request)
+}
+
+#[tauri::command]
+pub fn assignment_delete(
+    db: State<AppDb>,
+    schedule_id: String,
+    assignment_id: String,
+) -> Result<Vec<AssignmentView>, AppError> {
+    db.delete_assignment(&schedule_id, &assignment_id)
+}
+
+#[tauri::command]
+pub fn monthly_exclusion_list(
+    db: State<AppDb>,
+    schedule_id: String,
+) -> Result<Vec<MonthlyExclusionView>, AppError> {
+    db.list_monthly_exclusions(&schedule_id)
+}
+
+#[tauri::command]
+pub fn monthly_exclusion_save(
+    db: State<AppDb>,
+    request: SaveMonthlyExclusionRequest,
+) -> Result<Vec<MonthlyExclusionView>, AppError> {
+    db.save_monthly_exclusion(&request)
+}
+
+#[tauri::command]
+pub fn monthly_exclusion_delete(
+    db: State<AppDb>,
+    schedule_id: String,
+    teacher_id: String,
+) -> Result<Vec<MonthlyExclusionView>, AppError> {
+    db.delete_monthly_exclusion(&schedule_id, &teacher_id)
+}
+
+#[tauri::command]
+pub fn schedule_statistics(
+    db: State<AppDb>,
+    schedule_id: String,
+) -> Result<Vec<TeacherDutyStatistics>, AppError> {
+    db.schedule_statistics(&schedule_id)
 }

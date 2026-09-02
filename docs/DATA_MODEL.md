@@ -1,7 +1,7 @@
 # 财会系值班排班系统：数据模型
 
 > 文档版本：1.1  
-> 状态：开发基线；模式版本 3 已落地（Phase 2 done，2026-09-02）
+> 状态：开发基线；模式版本 4 已落地（Phase 3 done，2026-09-02）
 > 关联文档：[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[PRD.md](./PRD.md)、[TASKS.md](./TASKS.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
 ## 1. 建模原则
@@ -178,7 +178,7 @@ CHECK(
 
 `schema_migrations` 记录迁移版本，禁止运行时临时改表。`app_settings` 仅保存界面偏好、默认导出路径等非业务事实；当前学期可以保存为偏好，但业务查询不得依赖它代替外键。
 
-**Phase 0–2 已落地（最新模式版本 3）：**
+**Phase 0–3 已落地（最新模式版本 4）：**
 
 | 表                  | 状态     | 说明                                                                        |
 | ------------------- | -------- | --------------------------------------------------------------------------- |
@@ -190,8 +190,10 @@ CHECK(
 | `semester_teachers` | 已实现   | 学期成员快照、楼层、大值班、参与状态与非负公平基线。                        |
 | `monthly_schedules` | 已实现   | 学期内年月唯一；草稿/确认、确认时间和后续生成元数据已落地。                 |
 | `duty_dates`        | 已实现   | 日期类型、返校标记及 `AUTO` / `MANUAL` / `PENDING_CONFIRMATION` 来源。      |
+| `assignments`       | 已实现   | 统一人日账本；人工来源默认锁定，同人同日及普通日同岗位唯一。                |
+| `monthly_exclusions`| 已实现   | 月份与教师唯一，可保存自由文本原因，仅作为自动候选输入。                    |
 
-迁移 `003_monthly_schedules.sql` 已添加月份与日期表；`assignments`、`monthly_exclusions` 仍待 Phase 3。月份必须与学期范围相交，日期必须同时落在月份和学期内；返校来源与可空布尔值由数据库约束保持一致。数据库文件：macOS 开发/安装后位于 `~/Library/Application Support/com.caihui.duty-roster/duty-roster.db`。启动时开启 `foreign_keys` 与 WAL，并执行 `PRAGMA integrity_check`。
+迁移 `004_assignments_exclusions.sql` 已添加账本与月度排除表、部分唯一索引和跨表校验触发器。非系部日大值班会建立 `department_mode = NONE` 日期并保持不占岗位；删除最后一项外部任务时清理该日期。月份必须与学期范围相交，日期必须同时落在月份和学期内。数据库文件：macOS 开发/安装后位于 `~/Library/Application Support/com.caihui.duty-roster/duty-roster.db`。启动时开启 `foreign_keys` 与 WAL，并执行 `PRAGMA integrity_check`。
 
 ## 5. 派生视图与查询口径
 

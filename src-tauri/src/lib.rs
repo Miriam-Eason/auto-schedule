@@ -40,6 +40,13 @@ pub fn run() {
             commands::duty_date_save,
             commands::duty_date_delete,
             commands::duty_date_set_special_return,
+            commands::assignment_list,
+            commands::assignment_save_manual,
+            commands::assignment_delete,
+            commands::monthly_exclusion_list,
+            commands::monthly_exclusion_save,
+            commands::monthly_exclusion_delete,
+            commands::schedule_statistics,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

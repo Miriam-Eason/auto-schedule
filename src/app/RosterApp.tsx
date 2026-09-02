@@ -152,11 +152,9 @@ export function RosterApp({ repository }: RosterAppProps) {
         <div>
           <p className="eyebrow">月份与日期规则</p>
           <h1>财会系值班排班</h1>
-          <p className="lede">
-            建立月份、选择系部值班日并确认跨月特殊返校；当前阶段不会安排任何教师。
-          </p>
+          <p className="lede">选择日期、设置排除并录入人工固定任务；账本统计会按人日实时重算。</p>
         </div>
-        <span className="phase-badge">Phase 2</span>
+        <span className="phase-badge">Phase 3</span>
       </header>
 
       {notice ? (
@@ -221,7 +219,12 @@ export function RosterApp({ repository }: RosterAppProps) {
 
       {selectedSemester ? (
         <>
-          <MonthlyCalendar semester={selectedSemester} repository={repository} />
+          <MonthlyCalendar
+            semester={selectedSemester}
+            repository={repository}
+            members={members}
+            onLedgerChanged={() => refresh(selectedSemester.id)}
+          />
           <TeacherManager
             semester={selectedSemester}
             members={visibleMembers}

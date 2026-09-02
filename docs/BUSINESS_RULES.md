@@ -1,7 +1,7 @@
 # 财会系值班排班系统：业务规则规格
 
 > 文档版本：1.1  
-> 状态：开发基线；规则正文未改。Phase 1 已实现并测试 R001–R004；Phase 2 已实现并测试 R009–R014，并落地 R042/R044 基础状态流；其余规则按后续 Phase 实施
+> 状态：开发基线；规则正文未改。Phase 1 已实现并测试 R001–R004；Phase 2 已实现并测试 R009–R014，并落地 R042/R044 基础状态流；Phase 3 已实现并测试 R005–R008、R015–R024，并建立 R025 所需资格数据约束；自动候选筛选由 Phase 4 纯 TypeScript 引擎完成
 > 关联文档：[PRD.md](./PRD.md)、[DATA_MODEL.md](./DATA_MODEL.md)、[TASKS.md](./TASKS.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
 ## 1. 文档目的

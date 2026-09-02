@@ -412,6 +412,112 @@ button.danger {
   font-size: 13px;
 }
 
+.manual-roster {
+  margin-top: 24px;
+  border-top: 1px solid #dce3ea;
+  padding-top: 24px;
+}
+
+.compact-heading {
+  margin-bottom: 12px;
+}
+
+.compact-heading h3,
+.ledger-form h4 {
+  margin: 0 0 6px;
+}
+
+.phase-three-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(440px, 1.5fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.ledger-form {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  border: 1px solid #dce3ea;
+  border-radius: 10px;
+  padding: 16px;
+  background: #f8fafb;
+}
+
+.ledger-form label,
+.form-two-columns label {
+  display: grid;
+  gap: 6px;
+  color: #526978;
+  font-size: 12px;
+}
+
+.form-two-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.field-note {
+  align-self: end;
+  margin: 0;
+  padding: 10px 0;
+  color: #61788a;
+  font-size: 12px;
+}
+
+.compact-list {
+  display: grid;
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.compact-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid #e5eaee;
+  padding-top: 8px;
+  font-size: 13px;
+}
+
+.text-button {
+  padding: 4px 6px;
+  background: transparent;
+  color: #2f6f8f;
+  font-size: 12px;
+}
+
+.danger-text {
+  color: #a13c3c;
+}
+
+.ledger-table-wrap,
+.statistics-table-wrap {
+  margin-top: 16px;
+}
+
+.warning-tag {
+  margin-left: 6px;
+  background: #fff1cc;
+  color: #755315;
+}
+
+@media (max-width: 900px) {
+  .phase-three-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .form-two-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
 .date-actions {
   flex-wrap: wrap;
   justify-content: flex-end;

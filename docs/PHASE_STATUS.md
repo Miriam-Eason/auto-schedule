@@ -1,8 +1,8 @@
 # 阶段状态与关闭记录
 
 > 文档版本：1.1  
-> 当前阶段：**Phase 3（todo）**
-> 上一完成阶段：**Phase 2（done，2026-09-02）**
+> 当前阶段：**Phase 4（todo）**
+> 上一完成阶段：**Phase 3（done，2026-09-02）**
 > 关联文档：[TASKS.md](./TASKS.md)、[PRD.md](./PRD.md)、[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[DATA_MODEL.md](./DATA_MODEL.md)、[../AGENTS.md](../AGENTS.md)
 
 每个 Phase 结束时必须把本文件中对应条目从 `todo` 改为 `done`，并填写关闭记录。未开始的阶段保持 `todo`，不要预填完成项。
@@ -14,7 +14,7 @@
 | 0     | 项目骨架与持久化探针             | done | 2026-09-02 |
 | 1     | 学期、教师与三 Sheet 导入        | done | 2026-09-02 |
 | 2     | 月排班、日期类型与跨月特殊返校   | done | 2026-09-02 |
-| 3     | 人工固定排班、月度排除与账本统计 | todo | —          |
+| 3     | 人工固定排班、月度排除与账本统计 | done | 2026-09-02 |
 | 4     | 纯 TypeScript 排班引擎           | todo | —          |
 | 5     | 自动排班工作台与解释             | todo | —          |
 | 6     | 人工调整、完整状态流与历史编辑   | todo | —          |
@@ -22,7 +22,7 @@
 | 8     | 真实数据规则验证与体验收尾       | todo | —          |
 | 9     | macOS 与 Windows 发布            | todo | —          |
 
-里程碑：M0 技术可行 = **done**。M1–M4 仍为 todo。
+里程碑：M0 技术可行、M1 可人工排班 = **done**。M2–M4 仍为 todo。
 
 ---
 
@@ -224,6 +224,76 @@
 ### 下一 Phase 输入条件
 
 已满足：模式版本 3、月份/日期外键、普通/集中日期结构、人工返校来源、跨月日期查询和草稿事务边界均可供 Phase 3 复用。下一步只实施 `assignments`、`monthly_exclusions`、人工固定任务和统一人日账本统计，不接入自动排班引擎。
+
+---
+
+## Phase 3 关闭记录（done）
+
+- 关闭日期：2026-09-02
+- 状态变化：`todo` → `done`
+
+### 完成项
+
+- 新增模式版本 4：`assignments`、`monthly_exclusions`，包含任务/来源/楼层枚举、人工锁定约束、同人同日唯一、普通日同岗位部分唯一索引、外键索引与跨表一致性触发器。
+- 新增 Rust/Tauri 账本命令：按月列出、新增和删除人工安排；所有写操作校验活动学期与草稿月份，并在事务内保存或回滚。
+- 普通日支持人工选择 `LOWER` / `UPPER` 目标岗位，默认教师所属楼层并允许管理员明确跨楼层；同岗位重复和同人同日重复由数据库拒绝。
+- 集中值班日支持任意人数且不生成双岗位；支持 `NORMAL_DUTY`、`BIG_DUTY`、`HEAD_TEACHER_GROUP`、`TERM_SPECIAL`、`LEADER`、`OTHER` 全部任务类型。
+- 大值班落在普通系部日时占目标楼层岗位；落在非系部日时自动建立 `department_mode = NONE` 日期，只记账不占岗位，删除最后一项外部任务时清理该日期。
+- 新增按月份保存、更新和移除月度排除；排除不跨月继承。人工选择已排除、本月已有值班、相邻日值班或跨楼层教师时，界面显示具体影响并允许管理员继续。
+- 新增统一账本派生统计：本月实际、学期实际、初始公平基线、有效公平次数、特殊返校次数和历次日期；添加/删除及应用重启后均从账本重算。
+- 月历加入 Phase 3 面板：月度排除表单、固定任务表单、人工账本列表和教师统计表；已确认月份及关闭学期保持只读。
+- 删除已有人工安排的日期前给出明确影响提示；普通日已有占岗记录时禁止直接切换为集中日，避免留下不合法岗位。
+
+### 未完成项 / 明确不做
+
+- 未实现自动候选筛选、可行性估算、第二轮或自动落位；R025 的教师/参与状态/月度排除/同日人日输入已具备，实际候选算法严格留给 Phase 4 的纯 TypeScript 引擎。
+- 未接入“生成”“补齐空缺”“重新自动排班”按钮，也未写入 `source = AUTO` 记录；属于 Phase 4–5。
+- 确认月份仍只校验返校待确认状态；普通岗位完整性和警告知情确认属于 Phase 6。
+- 未用真实教师名单写入用户数据库或测试快照；真实月份回放仍在 Phase 8。
+
+### 测试结果
+
+| 命令                                        | 结果                                                                                                                 |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `npm run typecheck`                         | 通过                                                                                                                 |
+| `npm test`                                  | 12 通过（3 个文件）：既有 8 项 + 人工突破提示与跨月相邻日 4 项                                                       |
+| `npm run test:rust`                         | 18 通过：既有 13 项回归 + 普通岗位唯一、非系部大值班、集中日多人、月度排除人工突破、删除/重启重算 5 项              |
+| `npm run build`                             | 通过；主块约 228 kB，ExcelJS 按需块约 937 kB（gzip 271 kB），保留既有 Vite 大块提示                                  |
+| `npm run format:check`                      | 通过                                                                                                                 |
+| `cargo clippy --all-targets -- -D warnings` | 通过                                                                                                                 |
+| `npm run tauri:build`                       | 通过；沙箱内 release 与 `.app` 成功但 DMG 脚本受限，授权后重跑生成 `.app` 与 `.dmg`                                  |
+
+手工验证：
+
+- 启动本地 Vite 页面并在浏览器检查 Phase 3 标题、说明、学期空状态和基础布局均正常渲染，控制台无前端错误；普通浏览器无法提供 Tauri `invoke`，因此数据交互路径由临时 SQLite 的 Rust 集成测试覆盖。
+- Rust 临时数据库实际执行了普通日占岗、集中日两人、非系部大值班、排除后人工安排、删除重算和关闭重开读取，未写入用户应用数据库。
+- macOS release、`.app` 与 `.dmg` 产物均实际生成。
+
+### 改动文件
+
+- 迁移与 Rust：`src-tauri/migrations/004_assignments_exclusions.sql`、`src-tauri/src/{db,commands,lib}.rs`
+- 前端：`src/app/ManualRosterPanel.tsx`、`src/app/{MonthlyCalendar,RosterApp}.tsx`、`src/domain/manualAssignmentWarnings{,.test}.ts`、`src/App.css`
+- 仓储：`src/repositories/{types,sqlite}.ts`
+- 文档：`AGENTS.md`、`README.md`、`docs/{PRD,BUSINESS_RULES,DATA_MODEL,TASKS,PHASE_STATUS}.md`
+
+### 文档更新
+
+- [PRD.md](./PRD.md)：实现状态推进到 Phase 4，补 F02、F05、F06 已落地范围，并确认导出模板已存在。
+- [BUSINESS_RULES.md](./BUSINESS_RULES.md)：规则正文未改；标记 R005–R008、R015–R024 已实现测试及 R025 的 Phase 4 边界。
+- [DATA_MODEL.md](./DATA_MODEL.md)：最新模式版本改为 4，记录两张 Phase 3 表、索引、触发器和外部大值班 `NONE` 日期生命周期。
+- [TASKS.md](./TASKS.md)：Phase 3 标 done、M1 标 done，下一任务改为 Phase 4。
+- [../README.md](../README.md) / [../AGENTS.md](../AGENTS.md)：更新当前阶段、数据库版本和下一 Phase。
+
+### 遗留问题
+
+1. R025 的最终候选资格组合、R015 的自动不得覆盖人工，以及 R024 的后续自然公平，需要 Phase 4 引擎用纯 TypeScript 固定输入测试完成；Phase 3 未越界实现算法。
+2. ExcelJS 按需块的既有 Vite 500 kB 提示仍在，不影响首屏或离线功能。
+3. 普通浏览器不能调用 Tauri 命令，本阶段没有向用户应用数据库写入演示数据；Tauri 命令与持久化由 Rust 临时库测试验证，真实桌面端流程在 Phase 8 回放。
+4. `reference/排班导出模版.xlsx` 当前已存在，原先“模板缺失”的 Phase 7 阻断已解除；具体字段映射仍需 Phase 7 锁定。
+
+### 下一 Phase 输入条件
+
+已满足：模式版本 4、统一人工账本、月度排除、普通岗位占用、集中/外部日期结构、教师学期快照、实际/公平/返校统计和历次日期均可转换为引擎 DTO。下一步只实施 Phase 4 纯 TypeScript 排班引擎及规则测试，不接 UI、SQLite、文件系统或最终生成按钮。
 
 ---
 

@@ -32,8 +32,10 @@ export interface ProbeRepository {
 export type FloorGroup = "LOWER" | "UPPER";
 export type SemesterStatus = "ACTIVE" | "CLOSED";
 export type ScheduleStatus = "DRAFT" | "CONFIRMED";
-export type DepartmentMode = "NORMAL" | "SPECIAL_MANUAL";
+export type DepartmentMode = "NONE" | "NORMAL" | "SPECIAL_MANUAL";
 export type SpecialReturnSource = "AUTO" | "MANUAL" | "PENDING_CONFIRMATION";
+export type DutyType =
+  "NORMAL_DUTY" | "BIG_DUTY" | "HEAD_TEACHER_GROUP" | "TERM_SPECIAL" | "LEADER" | "OTHER";
 
 export interface Semester {
   id: string;
@@ -147,6 +149,68 @@ export interface SaveDutyDateRequest {
   departmentMode: DepartmentMode;
 }
 
+export interface Assignment {
+  id: string;
+  scheduleId: string;
+  dutyDateId: string;
+  dutyDate: string;
+  departmentMode: DepartmentMode;
+  teacherId: string;
+  semesterTeacherId: string;
+  teacherName: string;
+  teacherFloor: FloorGroup;
+  dutyType: DutyType;
+  source: "MANUAL" | "AUTO";
+  locked: boolean;
+  occupiesDepartmentSlot: boolean;
+  slotFloor: FloorGroup | null;
+  note: string | null;
+  isSpecialReturn: boolean | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveManualAssignmentRequest {
+  id: string;
+  dutyDateId: string;
+  scheduleId: string;
+  dutyDate: string;
+  teacherId: string;
+  semesterTeacherId: string;
+  dutyType: DutyType;
+  slotFloor: FloorGroup | null;
+  note: string | null;
+}
+
+export interface MonthlyExclusion {
+  id: string;
+  scheduleId: string;
+  teacherId: string;
+  teacherName: string;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface SaveMonthlyExclusionRequest {
+  id: string;
+  scheduleId: string;
+  teacherId: string;
+  reason: string | null;
+}
+
+export interface TeacherDutyStatistics {
+  semesterTeacherId: string;
+  teacherId: string;
+  teacherName: string;
+  floorGroup: FloorGroup;
+  initialFairnessCount: number;
+  monthActualCount: number;
+  semesterActualCount: number;
+  effectiveSemesterCount: number;
+  specialReturnCount: number;
+  dutyDates: string[];
+}
+
 export interface RosterRepository {
   listSemesters(): Promise<Semester[]>;
   createSemester(request: CreateSemesterRequest): Promise<Semester>;
@@ -169,4 +233,11 @@ export interface RosterRepository {
     dutyDate: string,
     value: boolean | null,
   ): Promise<DutyDate[]>;
+  listAssignments(scheduleId: string): Promise<Assignment[]>;
+  saveManualAssignment(request: SaveManualAssignmentRequest): Promise<Assignment[]>;
+  deleteAssignment(scheduleId: string, assignmentId: string): Promise<Assignment[]>;
+  listMonthlyExclusions(scheduleId: string): Promise<MonthlyExclusion[]>;
+  saveMonthlyExclusion(request: SaveMonthlyExclusionRequest): Promise<MonthlyExclusion[]>;
+  deleteMonthlyExclusion(scheduleId: string, teacherId: string): Promise<MonthlyExclusion[]>;
+  getScheduleStatistics(scheduleId: string): Promise<TeacherDutyStatistics[]>;
 }

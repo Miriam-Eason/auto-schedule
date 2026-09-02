@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
-const LATEST_SCHEMA_VERSION: i32 = 3;
+const LATEST_SCHEMA_VERSION: i32 = 4;
 
 struct Migration {
     version: i32,
@@ -30,6 +30,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 3,
         name: "monthly_schedules",
         sql: include_str!("../migrations/003_monthly_schedules.sql"),
+    },
+    Migration {
+        version: 4,
+        name: "assignments_exclusions",
+        sql: include_str!("../migrations/004_assignments_exclusions.sql"),
     },
 ];
 
@@ -184,6 +189,78 @@ pub struct SaveDutyDateRequest {
     pub schedule_id: String,
     pub duty_date: String,
     pub department_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignmentView {
+    pub id: String,
+    pub schedule_id: String,
+    pub duty_date_id: String,
+    pub duty_date: String,
+    pub department_mode: String,
+    pub teacher_id: String,
+    pub semester_teacher_id: String,
+    pub teacher_name: String,
+    pub teacher_floor: String,
+    pub duty_type: String,
+    pub source: String,
+    pub locked: bool,
+    pub occupies_department_slot: bool,
+    pub slot_floor: Option<String>,
+    pub note: Option<String>,
+    pub is_special_return: Option<bool>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveManualAssignmentRequest {
+    pub id: String,
+    pub duty_date_id: String,
+    pub schedule_id: String,
+    pub duty_date: String,
+    pub teacher_id: String,
+    pub semester_teacher_id: String,
+    pub duty_type: String,
+    pub slot_floor: Option<String>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MonthlyExclusionView {
+    pub id: String,
+    pub schedule_id: String,
+    pub teacher_id: String,
+    pub teacher_name: String,
+    pub reason: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveMonthlyExclusionRequest {
+    pub id: String,
+    pub schedule_id: String,
+    pub teacher_id: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TeacherDutyStatistics {
+    pub semester_teacher_id: String,
+    pub teacher_id: String,
+    pub teacher_name: String,
+    pub floor_group: String,
+    pub initial_fairness_count: i32,
+    pub month_actual_count: i32,
+    pub semester_actual_count: i32,
+    pub effective_semester_count: i32,
+    pub special_return_count: i32,
+    pub duty_dates: Vec<String>,
 }
 
 pub struct AppDb {
@@ -397,7 +474,13 @@ impl AppDb {
         let mut stmt = conn.prepare(
             "SELECT st.id, st.semester_id, st.teacher_id, t.name, t.active, t.note,
                     st.floor_group, st.is_major_duty, st.participates,
-                    st.initial_fairness_count, st.display_name_snapshot
+                    st.initial_fairness_count, st.display_name_snapshot,
+                    (SELECT COUNT(DISTINCT dd.duty_date)
+                     FROM assignments a
+                     JOIN duty_dates dd ON dd.id = a.duty_date_id
+                     JOIN monthly_schedules ams ON ams.id = a.schedule_id
+                     WHERE a.teacher_id = st.teacher_id
+                       AND ams.semester_id = st.semester_id)
              FROM semester_teachers st
              JOIN teachers t ON t.id = st.teacher_id
              WHERE st.semester_id = ?1
@@ -607,6 +690,31 @@ impl AppDb {
                 "duty date must belong to the schedule month and semester".into(),
             ));
         }
+        let existing_mode: Option<String> = tx
+            .query_row(
+                "SELECT department_mode FROM duty_dates
+                 WHERE schedule_id = ?1 AND duty_date = ?2",
+                rusqlite::params![request.schedule_id, request.duty_date],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if existing_mode
+            .as_deref()
+            .is_some_and(|mode| mode != request.department_mode)
+        {
+            let assignments: i32 = tx.query_row(
+                "SELECT COUNT(*) FROM assignments a
+                 JOIN duty_dates dd ON dd.id = a.duty_date_id
+                 WHERE dd.schedule_id = ?1 AND dd.duty_date = ?2",
+                rusqlite::params![request.schedule_id, request.duty_date],
+                |row| row.get(0),
+            )?;
+            if assignments > 0 {
+                return Err(AppError::Invalid(
+                    "remove existing assignments before changing the department date type".into(),
+                ));
+            }
+        }
         tx.execute(
             "INSERT INTO duty_dates
              (id, schedule_id, duty_date, department_mode, is_special_return,
@@ -721,6 +829,263 @@ impl AppDb {
         query_monthly_schedule(&conn, id)
     }
 
+    pub fn list_assignments(&self, schedule_id: &str) -> Result<Vec<AssignmentView>, AppError> {
+        let conn = self.lock()?;
+        query_monthly_schedule(&conn, schedule_id)?;
+        list_assignments_conn(&conn, schedule_id)
+    }
+
+    pub fn save_manual_assignment(
+        &self,
+        request: &SaveManualAssignmentRequest,
+    ) -> Result<Vec<AssignmentView>, AppError> {
+        validate_id(&request.id, "assignment id")?;
+        validate_id(&request.duty_date_id, "duty date id")?;
+        validate_id(&request.teacher_id, "teacher id")?;
+        validate_id(&request.semester_teacher_id, "semester teacher id")?;
+        validate_duty_type(&request.duty_type)?;
+        if !is_valid_business_date(&request.duty_date) {
+            return Err(AppError::Invalid(
+                "assignment date must be a valid YYYY-MM-DD date".into(),
+            ));
+        }
+
+        let mut conn = self.lock()?;
+        let tx = conn.transaction()?;
+        let schedule = require_editable_schedule(&tx, &request.schedule_id)?;
+        let semester = query_semester(&tx, &schedule.semester_id)?;
+        if !request.duty_date.starts_with(&schedule.year_month)
+            || request.duty_date.as_str() < semester.start_date.as_str()
+            || request.duty_date.as_str() > semester.end_date.as_str()
+        {
+            return Err(AppError::Invalid(
+                "assignment date must belong to the schedule month and semester".into(),
+            ));
+        }
+
+        let member: (String, String) = tx
+            .query_row(
+                "SELECT teacher_id, floor_group FROM semester_teachers
+                 WHERE id = ?1 AND semester_id = ?2",
+                rusqlite::params![request.semester_teacher_id, schedule.semester_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| AppError::Invalid("teacher is not a member of this semester".into()))?;
+        if member.0 != request.teacher_id {
+            return Err(AppError::Invalid(
+                "semester teacher does not match the selected teacher".into(),
+            ));
+        }
+
+        let date_record: Option<(String, String)> = tx
+            .query_row(
+                "SELECT id, department_mode FROM duty_dates
+                 WHERE schedule_id = ?1 AND duty_date = ?2",
+                rusqlite::params![request.schedule_id, request.duty_date],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let (duty_date_id, department_mode) = if let Some(found) = date_record {
+            found
+        } else {
+            if request.duty_type != "BIG_DUTY" {
+                return Err(AppError::Invalid(
+                    "only BIG_DUTY may be recorded on a non-department date".into(),
+                ));
+            }
+            tx.execute(
+                "INSERT INTO duty_dates
+                 (id, schedule_id, duty_date, department_mode, is_special_return,
+                  special_return_source, note, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'NONE', 0, 'AUTO', NULL,
+                         strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                         strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                rusqlite::params![request.duty_date_id, request.schedule_id, request.duty_date],
+            )?;
+            (request.duty_date_id.clone(), "NONE".to_string())
+        };
+
+        let slot_floor = if department_mode == "NORMAL" {
+            let floor = request.slot_floor.as_deref().unwrap_or(&member.1);
+            validate_floor(floor)?;
+            Some(floor)
+        } else {
+            if request.slot_floor.is_some() {
+                return Err(AppError::Invalid(
+                    "concentrated and non-department dates do not have floor slots".into(),
+                ));
+            }
+            None
+        };
+        if department_mode == "NONE" && request.duty_type != "BIG_DUTY" {
+            return Err(AppError::Invalid(
+                "non-department dates only support BIG_DUTY".into(),
+            ));
+        }
+
+        tx.execute(
+            "INSERT INTO assignments
+             (id, schedule_id, duty_date_id, teacher_id, semester_teacher_id, duty_type,
+              source, locked, occupies_department_slot, slot_floor, explanation_json, note,
+              created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'MANUAL', 1, ?7, ?8, NULL, ?9,
+                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            rusqlite::params![
+                request.id,
+                request.schedule_id,
+                duty_date_id,
+                request.teacher_id,
+                request.semester_teacher_id,
+                request.duty_type,
+                slot_floor.is_some(),
+                slot_floor,
+                clean_optional(&request.note),
+            ],
+        )?;
+        tx.commit()?;
+        list_assignments_conn(&conn, &request.schedule_id)
+    }
+
+    pub fn delete_assignment(
+        &self,
+        schedule_id: &str,
+        assignment_id: &str,
+    ) -> Result<Vec<AssignmentView>, AppError> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction()?;
+        require_editable_schedule(&tx, schedule_id)?;
+        let date: (String, String) = tx
+            .query_row(
+                "SELECT dd.id, dd.department_mode FROM assignments a
+                 JOIN duty_dates dd ON dd.id = a.duty_date_id
+                 WHERE a.id = ?1 AND a.schedule_id = ?2 AND a.source = 'MANUAL'",
+                rusqlite::params![assignment_id, schedule_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| AppError::Invalid("manual assignment not found".into()))?;
+        tx.execute("DELETE FROM assignments WHERE id = ?1", [assignment_id])?;
+        if date.1 == "NONE" {
+            tx.execute(
+                "DELETE FROM duty_dates WHERE id = ?1
+                 AND NOT EXISTS (SELECT 1 FROM assignments WHERE duty_date_id = ?1)",
+                [&date.0],
+            )?;
+        }
+        tx.commit()?;
+        list_assignments_conn(&conn, schedule_id)
+    }
+
+    pub fn list_monthly_exclusions(
+        &self,
+        schedule_id: &str,
+    ) -> Result<Vec<MonthlyExclusionView>, AppError> {
+        let conn = self.lock()?;
+        query_monthly_schedule(&conn, schedule_id)?;
+        list_monthly_exclusions_conn(&conn, schedule_id)
+    }
+
+    pub fn save_monthly_exclusion(
+        &self,
+        request: &SaveMonthlyExclusionRequest,
+    ) -> Result<Vec<MonthlyExclusionView>, AppError> {
+        validate_id(&request.id, "monthly exclusion id")?;
+        validate_id(&request.teacher_id, "teacher id")?;
+        let conn = self.lock()?;
+        require_editable_schedule(&conn, &request.schedule_id)?;
+        conn.execute(
+            "INSERT INTO monthly_exclusions (id, schedule_id, teacher_id, reason, created_at)
+             VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             ON CONFLICT(schedule_id, teacher_id) DO UPDATE SET reason = excluded.reason",
+            rusqlite::params![
+                request.id,
+                request.schedule_id,
+                request.teacher_id,
+                clean_optional(&request.reason)
+            ],
+        )?;
+        list_monthly_exclusions_conn(&conn, &request.schedule_id)
+    }
+
+    pub fn delete_monthly_exclusion(
+        &self,
+        schedule_id: &str,
+        teacher_id: &str,
+    ) -> Result<Vec<MonthlyExclusionView>, AppError> {
+        let conn = self.lock()?;
+        require_editable_schedule(&conn, schedule_id)?;
+        let changed = conn.execute(
+            "DELETE FROM monthly_exclusions WHERE schedule_id = ?1 AND teacher_id = ?2",
+            rusqlite::params![schedule_id, teacher_id],
+        )?;
+        if changed == 0 {
+            return Err(AppError::Invalid("monthly exclusion not found".into()));
+        }
+        list_monthly_exclusions_conn(&conn, schedule_id)
+    }
+
+    pub fn schedule_statistics(
+        &self,
+        schedule_id: &str,
+    ) -> Result<Vec<TeacherDutyStatistics>, AppError> {
+        let conn = self.lock()?;
+        let schedule = query_monthly_schedule(&conn, schedule_id)?;
+        let mut members = conn.prepare(
+            "SELECT st.id, st.teacher_id, st.display_name_snapshot, st.floor_group,
+                    st.initial_fairness_count
+             FROM semester_teachers st
+             WHERE st.semester_id = ?1
+             ORDER BY st.display_name_snapshot COLLATE NOCASE, st.teacher_id",
+        )?;
+        let rows = members.query_map([&schedule.semester_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i32>(4)?,
+            ))
+        })?;
+        let members = rows.collect::<Result<Vec<_>, _>>()?;
+        let mut result = Vec::with_capacity(members.len());
+        for (semester_teacher_id, teacher_id, teacher_name, floor_group, initial) in members {
+            let mut dates_stmt = conn.prepare(
+                "SELECT DISTINCT dd.duty_date, COALESCE(dd.is_special_return, 0)
+                 FROM assignments a
+                 JOIN duty_dates dd ON dd.id = a.duty_date_id
+                 JOIN monthly_schedules ms ON ms.id = a.schedule_id
+                 WHERE a.teacher_id = ?1 AND ms.semester_id = ?2
+                 ORDER BY dd.duty_date",
+            )?;
+            let date_rows = dates_stmt
+                .query_map(rusqlite::params![teacher_id, schedule.semester_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+                })?;
+            let dates = date_rows.collect::<Result<Vec<_>, _>>()?;
+            let month_actual_count = dates
+                .iter()
+                .filter(|(date, _)| date.starts_with(&schedule.year_month))
+                .count() as i32;
+            let semester_actual_count = dates.len() as i32;
+            let special_return_count = dates.iter().filter(|(_, special)| *special).count() as i32;
+            result.push(TeacherDutyStatistics {
+                semester_teacher_id,
+                teacher_id,
+                teacher_name,
+                floor_group,
+                initial_fairness_count: initial,
+                month_actual_count,
+                semester_actual_count,
+                effective_semester_count: initial + semester_actual_count,
+                special_return_count,
+                duty_dates: dates.into_iter().map(|(date, _)| date).collect(),
+            });
+        }
+        Ok(result)
+    }
+
     fn get_semester_teacher(
         &self,
         semester_id: &str,
@@ -730,7 +1095,13 @@ impl AppDb {
         conn.query_row(
             "SELECT st.id, st.semester_id, st.teacher_id, t.name, t.active, t.note,
                     st.floor_group, st.is_major_duty, st.participates,
-                    st.initial_fairness_count, st.display_name_snapshot
+                    st.initial_fairness_count, st.display_name_snapshot,
+                    (SELECT COUNT(DISTINCT dd.duty_date)
+                     FROM assignments a
+                     JOIN duty_dates dd ON dd.id = a.duty_date_id
+                     JOIN monthly_schedules ams ON ams.id = a.schedule_id
+                     WHERE a.teacher_id = st.teacher_id
+                       AND ams.semester_id = st.semester_id)
              FROM semester_teachers st JOIN teachers t ON t.id = st.teacher_id
              WHERE st.semester_id = ?1 AND st.teacher_id = ?2",
             rusqlite::params![semester_id, teacher_id],
@@ -760,6 +1131,7 @@ fn semester_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Semester> {
 
 fn semester_teacher_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SemesterTeacherView> {
     let initial_fairness_count: i32 = row.get(9)?;
+    let actual_semester_count: i32 = row.get(11)?;
     Ok(SemesterTeacherView {
         id: row.get(0)?,
         semester_id: row.get(1)?,
@@ -772,8 +1144,8 @@ fn semester_teacher_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Semest
         participates: row.get(8)?,
         initial_fairness_count,
         display_name_snapshot: row.get(10)?,
-        actual_semester_count: 0,
-        effective_semester_count: initial_fairness_count,
+        actual_semester_count,
+        effective_semester_count: initial_fairness_count + actual_semester_count,
     })
 }
 
@@ -854,6 +1226,75 @@ fn list_duty_dates_conn(conn: &Connection, schedule_id: &str) -> Result<Vec<Duty
          FROM duty_dates WHERE schedule_id = ?1 ORDER BY duty_date ASC, id ASC",
     )?;
     let rows = stmt.query_map([schedule_id], duty_date_from_row)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+fn assignment_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssignmentView> {
+    Ok(AssignmentView {
+        id: row.get(0)?,
+        schedule_id: row.get(1)?,
+        duty_date_id: row.get(2)?,
+        duty_date: row.get(3)?,
+        department_mode: row.get(4)?,
+        teacher_id: row.get(5)?,
+        semester_teacher_id: row.get(6)?,
+        teacher_name: row.get(7)?,
+        teacher_floor: row.get(8)?,
+        duty_type: row.get(9)?,
+        source: row.get(10)?,
+        locked: row.get(11)?,
+        occupies_department_slot: row.get(12)?,
+        slot_floor: row.get(13)?,
+        note: row.get(14)?,
+        is_special_return: row.get(15)?,
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
+    })
+}
+
+fn list_assignments_conn(
+    conn: &Connection,
+    schedule_id: &str,
+) -> Result<Vec<AssignmentView>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.schedule_id, a.duty_date_id, dd.duty_date, dd.department_mode,
+                a.teacher_id, a.semester_teacher_id, st.display_name_snapshot, st.floor_group,
+                a.duty_type, a.source, a.locked, a.occupies_department_slot, a.slot_floor,
+                a.note, dd.is_special_return, a.created_at, a.updated_at
+         FROM assignments a
+         JOIN duty_dates dd ON dd.id = a.duty_date_id
+         JOIN semester_teachers st ON st.id = a.semester_teacher_id
+         WHERE a.schedule_id = ?1
+         ORDER BY dd.duty_date, a.slot_floor, st.display_name_snapshot, a.id",
+    )?;
+    let rows = stmt.query_map([schedule_id], assignment_from_row)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+fn list_monthly_exclusions_conn(
+    conn: &Connection,
+    schedule_id: &str,
+) -> Result<Vec<MonthlyExclusionView>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT me.id, me.schedule_id, me.teacher_id, st.display_name_snapshot,
+                me.reason, me.created_at
+         FROM monthly_exclusions me
+         JOIN monthly_schedules ms ON ms.id = me.schedule_id
+         JOIN semester_teachers st
+           ON st.semester_id = ms.semester_id AND st.teacher_id = me.teacher_id
+         WHERE me.schedule_id = ?1
+         ORDER BY st.display_name_snapshot COLLATE NOCASE, me.teacher_id",
+    )?;
+    let rows = stmt.query_map([schedule_id], |row| {
+        Ok(MonthlyExclusionView {
+            id: row.get(0)?,
+            schedule_id: row.get(1)?,
+            teacher_id: row.get(2)?,
+            teacher_name: row.get(3)?,
+            reason: row.get(4)?,
+            created_at: row.get(5)?,
+        })
+    })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
@@ -971,6 +1412,16 @@ fn validate_floor(floor: &str) -> Result<(), AppError> {
         return Err(AppError::Invalid(
             "floor group must be LOWER or UPPER".into(),
         ));
+    }
+    Ok(())
+}
+
+fn validate_duty_type(duty_type: &str) -> Result<(), AppError> {
+    if !matches!(
+        duty_type,
+        "NORMAL_DUTY" | "BIG_DUTY" | "HEAD_TEACHER_GROUP" | "TERM_SPECIAL" | "LEADER" | "OTHER"
+    ) {
+        return Err(AppError::Invalid("unsupported duty type".into()));
     }
     Ok(())
 }
@@ -1267,7 +1718,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 3);
+        assert_eq!(count, 4);
     }
 
     #[test]
@@ -1284,7 +1735,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 3);
+        assert_eq!(count, 4);
         assert_eq!(current_version(&conn).unwrap(), latest_schema_version());
     }
 
@@ -1318,7 +1769,7 @@ mod tests {
         }
 
         let db = AppDb::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 3);
+        assert_eq!(db.schema_version().unwrap(), 4);
         assert_eq!(db.list_probe().unwrap()[0].message, "keep-me");
         let conn = db.lock().unwrap();
         let teacher_table: i32 = conn
@@ -1413,6 +1864,30 @@ mod tests {
             schedule_id: schedule_id.into(),
             duty_date: duty_date.into(),
             department_mode: department_mode.into(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn assignment_request(
+        id: &str,
+        duty_date_id: &str,
+        schedule_id: &str,
+        duty_date: &str,
+        teacher_id: &str,
+        semester_teacher_id: &str,
+        duty_type: &str,
+        slot_floor: Option<&str>,
+    ) -> SaveManualAssignmentRequest {
+        SaveManualAssignmentRequest {
+            id: id.into(),
+            duty_date_id: duty_date_id.into(),
+            schedule_id: schedule_id.into(),
+            duty_date: duty_date.into(),
+            teacher_id: teacher_id.into(),
+            semester_teacher_id: semester_teacher_id.into(),
+            duty_type: duty_type.into(),
+            slot_floor: slot_floor.map(str::to_string),
+            note: None,
         }
     }
 
@@ -1684,5 +2159,256 @@ mod tests {
         assert_eq!(date.department_mode, "SPECIAL_MANUAL");
         assert_eq!(date.is_special_return, Some(true));
         assert_eq!(date.special_return_source, "MANUAL");
+    }
+
+    #[test]
+    fn manual_normal_assignments_enforce_person_day_and_slot_uniqueness_r005_r022() {
+        let (_dir, db) = temp_db();
+        db.create_semester(&semester_request(
+            "s1",
+            "semester",
+            "2026-09-01",
+            "2027-01-31",
+        ))
+        .unwrap();
+        db.save_teacher(&teacher_request("t1", "st1", "s1", "Lower One"))
+            .unwrap();
+        db.save_teacher(&teacher_request("t2", "st2", "s1", "Lower Two"))
+            .unwrap();
+        db.create_monthly_schedule(&schedule_request("sep", "s1", "2026-09"))
+            .unwrap();
+        db.save_duty_date(&duty_date_request("d1", "sep", "2026-09-10", "NORMAL"))
+            .unwrap();
+
+        let saved = db
+            .save_manual_assignment(&assignment_request(
+                "a1",
+                "unused",
+                "sep",
+                "2026-09-10",
+                "t1",
+                "st1",
+                "NORMAL_DUTY",
+                Some("LOWER"),
+            ))
+            .unwrap();
+        assert_eq!(saved.len(), 1);
+        assert!(saved[0].locked);
+        assert!(saved[0].occupies_department_slot);
+
+        let same_person = db.save_manual_assignment(&assignment_request(
+            "a2",
+            "unused-2",
+            "sep",
+            "2026-09-10",
+            "t1",
+            "st1",
+            "OTHER",
+            Some("UPPER"),
+        ));
+        assert!(same_person.is_err());
+        let same_slot = db.save_manual_assignment(&assignment_request(
+            "a3",
+            "unused-3",
+            "sep",
+            "2026-09-10",
+            "t2",
+            "st2",
+            "NORMAL_DUTY",
+            Some("LOWER"),
+        ));
+        assert!(same_slot.is_err());
+        assert!(db
+            .save_duty_date(&duty_date_request(
+                "d1",
+                "sep",
+                "2026-09-10",
+                "SPECIAL_MANUAL",
+            ))
+            .is_err());
+        assert_eq!(db.list_assignments("sep").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn non_department_big_duty_counts_without_creating_a_slot_and_delete_rebuilds_r018_r020() {
+        let (_dir, db) = temp_db();
+        db.create_semester(&semester_request(
+            "s1",
+            "semester",
+            "2026-09-01",
+            "2027-01-31",
+        ))
+        .unwrap();
+        let mut teacher = teacher_request("t1", "st1", "s1", "Major Duty");
+        teacher.is_major_duty = true;
+        teacher.initial_fairness_count = 2;
+        db.save_teacher(&teacher).unwrap();
+        db.create_monthly_schedule(&schedule_request("sep", "s1", "2026-09"))
+            .unwrap();
+
+        let saved = db
+            .save_manual_assignment(&assignment_request(
+                "a1",
+                "external-date",
+                "sep",
+                "2026-09-05",
+                "t1",
+                "st1",
+                "BIG_DUTY",
+                None,
+            ))
+            .unwrap();
+        assert_eq!(saved[0].department_mode, "NONE");
+        assert!(!saved[0].occupies_department_slot);
+        let stats = db.schedule_statistics("sep").unwrap().remove(0);
+        assert_eq!(stats.month_actual_count, 1);
+        assert_eq!(stats.semester_actual_count, 1);
+        assert_eq!(stats.effective_semester_count, 3);
+
+        db.delete_assignment("sep", "a1").unwrap();
+        let stats = db.schedule_statistics("sep").unwrap().remove(0);
+        assert_eq!(stats.month_actual_count, 0);
+        assert_eq!(stats.effective_semester_count, 2);
+        assert!(db.list_duty_dates("sep").unwrap().is_empty());
+    }
+
+    #[test]
+    fn concentrated_day_allows_multiple_people_and_counts_special_return_r006_r007_r021() {
+        let (_dir, db) = temp_db();
+        db.create_semester(&semester_request(
+            "s1",
+            "semester",
+            "2026-09-01",
+            "2027-01-31",
+        ))
+        .unwrap();
+        db.save_teacher(&teacher_request("t1", "st1", "s1", "Teacher One"))
+            .unwrap();
+        let mut second = teacher_request("t2", "st2", "s1", "Teacher Two");
+        second.floor_group = "UPPER".into();
+        db.save_teacher(&second).unwrap();
+        db.create_monthly_schedule(&schedule_request("sep", "s1", "2026-09"))
+            .unwrap();
+        db.save_duty_date(&duty_date_request(
+            "d1",
+            "sep",
+            "2026-09-10",
+            "SPECIAL_MANUAL",
+        ))
+        .unwrap();
+        db.set_special_return("sep", "2026-09-10", Some(true))
+            .unwrap();
+
+        db.save_manual_assignment(&assignment_request(
+            "a1",
+            "unused",
+            "sep",
+            "2026-09-10",
+            "t1",
+            "st1",
+            "HEAD_TEACHER_GROUP",
+            None,
+        ))
+        .unwrap();
+        db.save_manual_assignment(&assignment_request(
+            "a2",
+            "unused-2",
+            "sep",
+            "2026-09-10",
+            "t2",
+            "st2",
+            "TERM_SPECIAL",
+            None,
+        ))
+        .unwrap();
+        let assignments = db.list_assignments("sep").unwrap();
+        assert_eq!(assignments.len(), 2);
+        assert!(assignments
+            .iter()
+            .all(|item| !item.occupies_department_slot));
+        assert!(db
+            .save_duty_date(&duty_date_request("d1", "sep", "2026-09-10", "NORMAL",))
+            .is_err());
+        let stats = db.schedule_statistics("sep").unwrap();
+        assert!(stats.iter().all(|item| item.special_return_count == 1));
+    }
+
+    #[test]
+    fn monthly_exclusion_is_month_scoped_and_manual_assignment_remains_allowed_r016_r023() {
+        let (_dir, db) = temp_db();
+        db.create_semester(&semester_request(
+            "s1",
+            "semester",
+            "2026-09-01",
+            "2027-01-31",
+        ))
+        .unwrap();
+        db.save_teacher(&teacher_request("t1", "st1", "s1", "Excluded Teacher"))
+            .unwrap();
+        db.create_monthly_schedule(&schedule_request("sep", "s1", "2026-09"))
+            .unwrap();
+        db.create_monthly_schedule(&schedule_request("oct", "s1", "2026-10"))
+            .unwrap();
+        db.save_monthly_exclusion(&SaveMonthlyExclusionRequest {
+            id: "e1".into(),
+            schedule_id: "sep".into(),
+            teacher_id: "t1".into(),
+            reason: Some("month only".into()),
+        })
+        .unwrap();
+        assert_eq!(db.list_monthly_exclusions("sep").unwrap().len(), 1);
+        assert!(db.list_monthly_exclusions("oct").unwrap().is_empty());
+
+        db.save_duty_date(&duty_date_request("d1", "sep", "2026-09-10", "NORMAL"))
+            .unwrap();
+        assert!(db
+            .save_manual_assignment(&assignment_request(
+                "a1",
+                "unused",
+                "sep",
+                "2026-09-10",
+                "t1",
+                "st1",
+                "NORMAL_DUTY",
+                Some("LOWER"),
+            ))
+            .is_ok());
+    }
+
+    #[test]
+    fn ledger_statistics_survive_reopen_and_update_semester_teacher_view_r008() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("duty-roster.db");
+        {
+            let db = AppDb::open(&path).unwrap();
+            db.create_semester(&semester_request(
+                "s1",
+                "semester",
+                "2026-09-01",
+                "2027-01-31",
+            ))
+            .unwrap();
+            db.save_teacher(&teacher_request("t1", "st1", "s1", "Teacher"))
+                .unwrap();
+            db.create_monthly_schedule(&schedule_request("sep", "s1", "2026-09"))
+                .unwrap();
+            db.save_manual_assignment(&assignment_request(
+                "a1",
+                "external",
+                "sep",
+                "2026-09-05",
+                "t1",
+                "st1",
+                "BIG_DUTY",
+                None,
+            ))
+            .unwrap();
+        }
+        let reopened = AppDb::open(&path).unwrap();
+        let stats = reopened.schedule_statistics("sep").unwrap().remove(0);
+        assert_eq!(stats.semester_actual_count, 1);
+        let member = reopened.list_semester_teachers("s1").unwrap().remove(0);
+        assert_eq!(member.actual_semester_count, 1);
+        assert_eq!(member.effective_semester_count, 1);
     }
 }

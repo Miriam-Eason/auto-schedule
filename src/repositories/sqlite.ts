@@ -19,6 +19,11 @@ import {
   type SemesterStatus,
   type SemesterTeacher,
   type Teacher,
+  type Assignment,
+  type MonthlyExclusion,
+  type SaveManualAssignmentRequest,
+  type SaveMonthlyExclusionRequest,
+  type TeacherDutyStatistics,
 } from "./types";
 
 function toAppError(error: unknown): AppError {
@@ -140,5 +145,33 @@ export class SqliteRosterRepository implements RosterRepository {
     value: boolean | null,
   ): Promise<DutyDate[]> {
     return invokeRoster("duty_date_set_special_return", { scheduleId, dutyDate, value });
+  }
+
+  listAssignments(scheduleId: string): Promise<Assignment[]> {
+    return invokeRoster("assignment_list", { scheduleId });
+  }
+
+  saveManualAssignment(request: SaveManualAssignmentRequest): Promise<Assignment[]> {
+    return invokeRoster("assignment_save_manual", { request });
+  }
+
+  deleteAssignment(scheduleId: string, assignmentId: string): Promise<Assignment[]> {
+    return invokeRoster("assignment_delete", { scheduleId, assignmentId });
+  }
+
+  listMonthlyExclusions(scheduleId: string): Promise<MonthlyExclusion[]> {
+    return invokeRoster("monthly_exclusion_list", { scheduleId });
+  }
+
+  saveMonthlyExclusion(request: SaveMonthlyExclusionRequest): Promise<MonthlyExclusion[]> {
+    return invokeRoster("monthly_exclusion_save", { request });
+  }
+
+  deleteMonthlyExclusion(scheduleId: string, teacherId: string): Promise<MonthlyExclusion[]> {
+    return invokeRoster("monthly_exclusion_delete", { scheduleId, teacherId });
+  }
+
+  getScheduleStatistics(scheduleId: string): Promise<TeacherDutyStatistics[]> {
+    return invokeRoster("schedule_statistics", { scheduleId });
   }
 }
