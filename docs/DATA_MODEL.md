@@ -1,7 +1,7 @@
 # 财会系值班排班系统：数据模型
 
 > 文档版本：1.1  
-> 状态：开发基线；模式版本 4 已落地（Phase 3 done，2026-09-02）
+> 状态：开发基线；模式版本 4 已落地且 Phase 4 无模式变更（Phase 4 done，2026-09-02）
 > 关联文档：[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[PRD.md](./PRD.md)、[TASKS.md](./TASKS.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
 ## 1. 建模原则
@@ -261,6 +261,8 @@ interface ScheduleIssue {
   suggestedAction?: string;
 }
 ```
+
+**Phase 4 实现状态：** `src/domain/scheduling/` 已提供版本 1 输入/输出 DTO、规则版本 1.1 的 `AssignmentExplanation`、可定位 `ScheduleIssue`、可行性结果、生成结果与派生统计。输入指纹使用规范化后的语义输入；`REGENERATE_AUTO` 模式会在指纹和工作账本中剔除旧自动记录并保留人工记录。上述类型仅存在于纯 TypeScript 领域层，本阶段未新增表或迁移，数据库最新模式版本仍为 4；Phase 5 负责仓储 DTO 转换和事务写入。
 
 ## 7. 状态与事务
 

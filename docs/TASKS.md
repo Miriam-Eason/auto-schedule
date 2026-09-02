@@ -1,8 +1,8 @@
 # 财会系值班排班系统：开发任务与验收计划
 
 > 文档版本：1.1  
-> 当前阶段：Phase 4（todo）
-> 上一完成阶段：Phase 3（done，2026-09-02）
+> 当前阶段：Phase 5（todo）
+> 上一完成阶段：Phase 4（done，2026-09-02）
 > 使用方式：每次只执行一个 Phase；先阅读全部文档和 `AGENTS.md`，再按本文件交付。结束时必须把状态从 todo 改为 done，并更新 [PHASE_STATUS.md](./PHASE_STATUS.md)。  
 > 关联文档：[PRD.md](./PRD.md)、[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[DATA_MODEL.md](./DATA_MODEL.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
@@ -173,7 +173,7 @@ duty-roster/
 
 完成项：模式版本 4、统一账本与月度排除、普通/集中/非系部三类人工任务路径、全部固定任务类型、人工突破提示，以及月度/学期/公平/特殊返校/历次日期派生统计。测试：Vitest 12、cargo test 18、typecheck/build/format/clippy 均通过；浏览器静态壳完成视觉检查。自动候选筛选和自动排班严格留给 Phase 4。
 
-## Phase 4：纯 TypeScript 排班引擎 【todo】
+## Phase 4：纯 TypeScript 排班引擎 【done】
 
 ### 目标
 
@@ -206,6 +206,12 @@ duty-roster/
 - 所有规则测试通过；相同输入重复 100 次结果一致。
 - 每个自动分配都有完整 `AssignmentExplanation`。
 - 可行性结果包含预计轮次与容量说明。
+
+### 状态
+
+**done**（2026-09-02）。关闭记录见 [PHASE_STATUS.md](./PHASE_STATUS.md#phase-4-关闭记录done)。
+
+完成项：版本 1 输入/输出 DTO、纯 TypeScript 账本与可行性、R025–R037 优先级链、R046 解释、R047–R050 引擎问题项、语义输入指纹及稳定决胜。BR-T01–BR-T15 和 Phase 4 补充边界均已测试；相同输入重复 100 次以及带旧自动结果的重新生成均复现一致。测试：Vitest 38、cargo test 18、typecheck/build/format 均通过。无数据库迁移、UI 或仓储接入；这些严格留给 Phase 5。
 
 ## Phase 5：自动排班工作台与解释 【todo】
 
@@ -340,5 +346,5 @@ duty-roster/
 
 ```text
 阅读 docs/PRD.md、docs/BUSINESS_RULES.md、docs/DATA_MODEL.md、docs/TASKS.md、docs/PHASE_STATUS.md 以及仓库 AGENTS.md。
-只实施 TASKS.md 的 Phase 4：纯 TypeScript 排班引擎。定义版本化 DTO，在不接 UI、SQLite 或文件系统的前提下，实现资格筛选、空缺与可行性、月度最低负担层、特殊返校、楼层 ±1、学期公平、间隔、相邻日放宽、稳定决胜、空缺警告、解释快照和输入指纹。覆盖 BUSINESS_RULES.md 的 BR-T01–BR-T15 及 Phase 4 补充用例；不要接入最终自动排班按钮。完成后按 AGENTS.md 关闭 Phase 4 并同步文档，等待验收。
+只实施 TASKS.md 的 Phase 5：自动排班工作台与解释。把 Phase 4 的版本 1 引擎 DTO 接入现有仓储数据，生成前展示可行性，在单个 Rust/SQLite 事务中保存自动结果；实现“补齐空缺”和“重新自动排班”，后者只替换自动记录并保留人工任务。展示岗位来源、统计、解释和可定位警告，处理重复点击、事务失败与过期输入。不要提前实施 Phase 6 的人工换人或完整确认流程。完成后按 AGENTS.md 关闭 Phase 5 并同步文档，等待验收。
 ```

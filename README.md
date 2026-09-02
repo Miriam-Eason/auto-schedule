@@ -2,7 +2,7 @@
 
 离线桌面应用：排班计算器 + 可视化编辑器 + 历史值班账本。
 
-当前完成 **Phase 0–3**（done，2026-09-02）。下一阶段是 **Phase 4**：纯 TypeScript 排班引擎。阶段状态与关闭记录见 [docs/PHASE_STATUS.md](docs/PHASE_STATUS.md)。
+当前完成 **Phase 0–4**（done，2026-09-02）。下一阶段是 **Phase 5**：自动排班工作台与解释。阶段状态与关闭记录见 [docs/PHASE_STATUS.md](docs/PHASE_STATUS.md)。
 
 产品文档：
 

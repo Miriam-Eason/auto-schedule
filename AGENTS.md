@@ -4,8 +4,8 @@
 
 ## 当前状态
 
-- 已完成：Phase 0、Phase 1、Phase 2、Phase 3（done，2026-09-02）
-- 进行中 / 下一个：Phase 4（todo）— 纯 TypeScript 排班引擎
+- 已完成：Phase 0、Phase 1、Phase 2、Phase 3、Phase 4（done，2026-09-02）
+- 进行中 / 下一个：Phase 5（todo）— 自动排班工作台与解释
 - 不要重做已标 `done` 的 Phase，除非关闭记录里的遗留问题明确要求返工
 
 ## 开始前
