@@ -24,6 +24,8 @@ import {
   type SaveManualAssignmentRequest,
   type SaveMonthlyExclusionRequest,
   type TeacherDutyStatistics,
+  type ScheduleAutomationContext,
+  type SaveAutoAssignmentsRequest,
 } from "./types";
 
 function toAppError(error: unknown): AppError {
@@ -173,5 +175,13 @@ export class SqliteRosterRepository implements RosterRepository {
 
   getScheduleStatistics(scheduleId: string): Promise<TeacherDutyStatistics[]> {
     return invokeRoster("schedule_statistics", { scheduleId });
+  }
+
+  getScheduleAutomationContext(scheduleId: string): Promise<ScheduleAutomationContext> {
+    return invokeRoster("schedule_automation_context", { scheduleId });
+  }
+
+  saveAutoAssignments(request: SaveAutoAssignmentsRequest): Promise<Assignment[]> {
+    return invokeRoster("assignment_save_auto", { request });
   }
 }

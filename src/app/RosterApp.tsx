@@ -150,11 +150,13 @@ export function RosterApp({ repository }: RosterAppProps) {
     <main className="workspace">
       <header className="workspace-header">
         <div>
-          <p className="eyebrow">月份与日期规则</p>
+          <p className="eyebrow">自动排班工作台</p>
           <h1>财会系值班排班</h1>
-          <p className="lede">选择日期、设置排除并录入人工固定任务；账本统计会按人日实时重算。</p>
+          <p className="lede">
+            按步骤选择日期、排除人员、录入固定任务，再检查容量并生成可解释的自动排班。
+          </p>
         </div>
-        <span className="phase-badge">Phase 3</span>
+        <span className="phase-badge">Phase 5</span>
       </header>
 
       {notice ? (

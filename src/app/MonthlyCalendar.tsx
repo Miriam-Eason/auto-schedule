@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type {
+  Assignment,
   DepartmentMode,
   DutyDate,
   MonthlySchedule,
@@ -51,6 +52,7 @@ export function MonthlyCalendar({
   const [schedules, setSchedules] = useState<MonthlySchedule[]>([]);
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
   const [dates, setDates] = useState<DutyDate[]>([]);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [newMonth, setNewMonth] = useState(semester.startDate.slice(0, 7));
   const [busy, setBusy] = useState(false);
@@ -66,6 +68,13 @@ export function MonthlyCalendar({
     [departmentDates],
   );
   const selectedDutyDate = selectedDate ? (dateByValue.get(selectedDate) ?? null) : null;
+  const assignmentsByDate = useMemo(() => {
+    const grouped = new Map<string, Assignment[]>();
+    for (const assignment of assignments) {
+      grouped.set(assignment.dutyDate, [...(grouped.get(assignment.dutyDate) ?? []), assignment]);
+    }
+    return grouped;
+  }, [assignments]);
   const cells = useMemo(() => (schedule ? calendarDates(schedule.yearMonth) : []), [schedule]);
   const editable = semester.status === "ACTIVE" && schedule?.status === "DRAFT";
   const pendingCount = departmentDates.filter(
@@ -78,10 +87,13 @@ export function MonthlyCalendar({
       const nextId = nextSchedules.some((item) => item.id === preferredId)
         ? (preferredId ?? null)
         : (nextSchedules[nextSchedules.length - 1]?.id ?? null);
-      const nextDates = nextId ? await repository.listDutyDates(nextId) : [];
+      const [nextDates, nextAssignments] = nextId
+        ? await Promise.all([repository.listDutyDates(nextId), repository.listAssignments(nextId)])
+        : [[], []];
       setSchedules(nextSchedules);
       setSelectedScheduleId(nextId);
       setDates(nextDates);
+      setAssignments(nextAssignments);
       setSelectedDate((current) =>
         current && nextDates.some((date) => date.dutyDate === current) ? current : null,
       );
@@ -115,7 +127,12 @@ export function MonthlyCalendar({
     setNotice(null);
     try {
       setSelectedScheduleId(id);
-      setDates(await repository.listDutyDates(id));
+      const [nextDates, nextAssignments] = await Promise.all([
+        repository.listDutyDates(id),
+        repository.listAssignments(id),
+      ]);
+      setDates(nextDates);
+      setAssignments(nextAssignments);
       setSelectedDate(null);
     } catch (error) {
       setNotice(errorMessage(error));
@@ -266,6 +283,13 @@ export function MonthlyCalendar({
 
       {schedule ? (
         <>
+          <ol className="workflow-steps" aria-label="排班步骤">
+            <li>1 选择日期</li>
+            <li>2 排除人员</li>
+            <li>3 固定安排</li>
+            <li className="active">4 自动排班</li>
+            <li>5 检查确认</li>
+          </ol>
           <div className="calendar-status">
             <span className={`status-chip ${schedule.status.toLowerCase()}`}>
               {schedule.status === "DRAFT" ? "草稿可编辑" : "已确认只读"}
@@ -284,9 +308,11 @@ export function MonthlyCalendar({
             {cells.map((value, index) => {
               if (!value) return <span className="calendar-empty" key={`empty-${index}`} />;
               const date = dateByValue.get(value);
+              const dayAssignments = assignmentsByDate.get(value) ?? [];
               const inSemester = value >= semester.startDate && value <= semester.endDate;
               return (
                 <button
+                  id={`calendar-day-${value}`}
                   className={`calendar-day ${date ? "has-duty" : ""} ${selectedDate === value ? "selected" : ""}`}
                   disabled={!inSemester}
                   key={value}
@@ -305,6 +331,20 @@ export function MonthlyCalendar({
                             ? "特殊返校"
                             : "连续周期"}
                       </small>
+                      {dayAssignments.slice(0, 3).map((assignment) => (
+                        <small className="calendar-assignment" key={assignment.id}>
+                          {assignment.slotFloor
+                            ? assignment.slotFloor === "LOWER"
+                              ? "1–3楼"
+                              : "4–5楼"
+                            : "任务"}
+                          · {assignment.teacherName} ·{" "}
+                          {assignment.source === "AUTO" ? "自动" : "人工"}
+                        </small>
+                      ))}
+                      {dayAssignments.length > 3 ? (
+                        <small>另有 {dayAssignments.length - 3} 人</small>
+                      ) : null}
                     </>
                   ) : null}
                 </button>
@@ -392,6 +432,15 @@ export function MonthlyCalendar({
             onLedgerChanged={async () => {
               await load(schedule.id);
               await onLedgerChanged();
+            }}
+            onLocateDate={(dutyDate) => {
+              setSelectedDate(dutyDate);
+              window.requestAnimationFrame(() =>
+                document.getElementById(`calendar-day-${dutyDate}`)?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "center",
+                }),
+              );
             }}
           />
         </>

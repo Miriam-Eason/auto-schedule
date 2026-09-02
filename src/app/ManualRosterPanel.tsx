@@ -12,6 +12,7 @@ import type {
   SemesterTeacher,
   TeacherDutyStatistics,
 } from "../repositories/types";
+import { AutomaticRosterPanel } from "./AutomaticRosterPanel";
 
 const dutyTypeLabels: Record<DutyType, string> = {
   NORMAL_DUTY: "普通值班",
@@ -34,6 +35,7 @@ export function ManualRosterPanel({
   editable,
   repository,
   onLedgerChanged,
+  onLocateDate,
 }: {
   schedule: MonthlySchedule;
   dates: DutyDate[];
@@ -42,6 +44,7 @@ export function ManualRosterPanel({
   editable: boolean;
   repository: RosterRepository;
   onLedgerChanged: () => Promise<void>;
+  onLocateDate: (dutyDate: string) => void;
 }) {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [exclusions, setExclusions] = useState<MonthlyExclusion[]>([]);
@@ -55,6 +58,7 @@ export function ManualRosterPanel({
   const [exclusionReason, setExclusionReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [automationRefreshVersion, setAutomationRefreshVersion] = useState(0);
 
   const load = useCallback(async () => {
     const [nextAssignments, nextExclusions, nextStatistics] = await Promise.all([
@@ -101,6 +105,7 @@ export function ManualRosterPanel({
   async function refreshAfterMutation() {
     await load();
     await onLedgerChanged();
+    setAutomationRefreshVersion((value) => value + 1);
   }
 
   async function saveAssignment(event: FormEvent) {
@@ -187,6 +192,7 @@ export function ManualRosterPanel({
       });
       setExclusionReason("");
       await load();
+      setAutomationRefreshVersion((value) => value + 1);
       setNotice("本月排除已保存；只影响后续自动候选，不阻止人工安排。");
     } catch (error) {
       setNotice(errorMessage(error));
@@ -201,6 +207,7 @@ export function ManualRosterPanel({
     try {
       await repository.deleteMonthlyExclusion(schedule.id, teacherIdToDelete);
       await load();
+      setAutomationRefreshVersion((value) => value + 1);
       setNotice("本月排除已移除。");
     } catch (error) {
       setNotice(errorMessage(error));
@@ -354,6 +361,7 @@ export function ManualRosterPanel({
               <th>日期</th>
               <th>教师</th>
               <th>任务</th>
+              <th>来源</th>
               <th>岗位</th>
               <th>返校</th>
               <th>说明</th>
@@ -363,8 +371,8 @@ export function ManualRosterPanel({
           <tbody>
             {assignments.length === 0 ? (
               <tr>
-                <td colSpan={7} className="empty-row">
-                  当前月份尚无人工值班。
+                <td colSpan={8} className="empty-row">
+                  当前月份尚无值班记录。
                 </td>
               </tr>
             ) : (
@@ -373,6 +381,11 @@ export function ManualRosterPanel({
                   <td>{item.dutyDate}</td>
                   <td>{item.teacherName}</td>
                   <td>{dutyTypeLabels[item.dutyType]}</td>
+                  <td>
+                    <span className={`tag ${item.source === "AUTO" ? "auto-tag" : "manual-tag"}`}>
+                      {item.source === "AUTO" ? "自动" : "人工锁定"}
+                    </span>
+                  </td>
                   <td>
                     {item.slotFloor
                       ? item.slotFloor === "LOWER"
@@ -383,14 +396,18 @@ export function ManualRosterPanel({
                   <td>{item.isSpecialReturn ? "特殊返校" : "—"}</td>
                   <td>{item.note ?? "—"}</td>
                   <td>
-                    <button
-                      className="text-button danger-text"
-                      disabled={!editable || busy}
-                      type="button"
-                      onClick={() => void deleteAssignment(item)}
-                    >
-                      删除
-                    </button>
+                    {item.source === "MANUAL" ? (
+                      <button
+                        className="text-button danger-text"
+                        disabled={!editable || busy}
+                        type="button"
+                        onClick={() => void deleteAssignment(item)}
+                      >
+                        删除
+                      </button>
+                    ) : (
+                      "由自动操作管理"
+                    )}
                   </td>
                 </tr>
               ))
@@ -398,6 +415,15 @@ export function ManualRosterPanel({
           </tbody>
         </table>
       </div>
+
+      <AutomaticRosterPanel
+        scheduleId={schedule.id}
+        editable={editable}
+        repository={repository}
+        refreshVersion={automationRefreshVersion}
+        onLocateDate={onLocateDate}
+        onSaved={refreshAfterMutation}
+      />
 
       <div className="table-wrap statistics-table-wrap">
         <table>

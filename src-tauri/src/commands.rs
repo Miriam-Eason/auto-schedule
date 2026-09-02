@@ -3,8 +3,9 @@ use tauri::State;
 use crate::db::{
     AppDb, AssignmentView, CreateMonthlyScheduleRequest, CreateSemesterRequest, DatabaseInfo,
     DutyDate, ImportResult, ImportTeachersRequest, MonthlyExclusionView, MonthlySchedule,
-    ProbeEvent, SaveDutyDateRequest, SaveManualAssignmentRequest, SaveMonthlyExclusionRequest,
-    SaveTeacherRequest, Semester, SemesterTeacherView, Teacher, TeacherDutyStatistics,
+    ProbeEvent, SaveAutoAssignmentsRequest, SaveDutyDateRequest, SaveManualAssignmentRequest,
+    SaveMonthlyExclusionRequest, SaveTeacherRequest, ScheduleAutomationContext, Semester,
+    SemesterTeacherView, Teacher, TeacherDutyStatistics,
 };
 use crate::error::AppError;
 
@@ -203,4 +204,20 @@ pub fn schedule_statistics(
     schedule_id: String,
 ) -> Result<Vec<TeacherDutyStatistics>, AppError> {
     db.schedule_statistics(&schedule_id)
+}
+
+#[tauri::command]
+pub fn schedule_automation_context(
+    db: State<AppDb>,
+    schedule_id: String,
+) -> Result<ScheduleAutomationContext, AppError> {
+    db.schedule_automation_context(&schedule_id)
+}
+
+#[tauri::command]
+pub fn assignment_save_auto(
+    db: State<AppDb>,
+    request: SaveAutoAssignmentsRequest,
+) -> Result<Vec<AssignmentView>, AppError> {
+    db.save_auto_assignments(&request)
 }

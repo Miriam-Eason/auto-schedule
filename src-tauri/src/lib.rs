@@ -47,6 +47,8 @@ pub fn run() {
             commands::monthly_exclusion_save,
             commands::monthly_exclusion_delete,
             commands::schedule_statistics,
+            commands::schedule_automation_context,
+            commands::assignment_save_auto,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,7 +1,7 @@
 # 财会系值班排班系统：数据模型
 
 > 文档版本：1.1  
-> 状态：开发基线；模式版本 4 已落地且 Phase 4 无模式变更（Phase 4 done，2026-09-02）
+> 状态：开发基线；模式版本 4 已落地，Phase 4–5 均无模式变更（Phase 5 done，2026-09-02）
 > 关联文档：[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[PRD.md](./PRD.md)、[TASKS.md](./TASKS.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
 ## 1. 建模原则
@@ -180,18 +180,18 @@ CHECK(
 
 **Phase 0–3 已落地（最新模式版本 4）：**
 
-| 表                  | 状态     | 说明                                                                        |
-| ------------------- | -------- | --------------------------------------------------------------------------- |
-| `schema_migrations` | 已实现   | `version` PK、`name` UNIQUE、`applied_at`。空库迁到 1；重复启动不重复插入。 |
-| `app_settings`      | 已建表   | `key` PK、`value`、`updated_at`。尚无业务读写。                             |
-| `probe_events`      | 开发探针 | 仅验证重启持久化，**不是**值班账本，Phase 1 不得当教师/排班表使用。         |
-| `teachers`          | 已实现   | 教师主档；UUID 主键，支持停用/恢复，重名不作为关联键。                      |
-| `semesters`         | 已实现   | 学期新建、选择、关闭/重开；合法日期与活动学期重叠在命令层校验。             |
-| `semester_teachers` | 已实现   | 学期成员快照、楼层、大值班、参与状态与非负公平基线。                        |
-| `monthly_schedules` | 已实现   | 学期内年月唯一；草稿/确认、确认时间和后续生成元数据已落地。                 |
-| `duty_dates`        | 已实现   | 日期类型、返校标记及 `AUTO` / `MANUAL` / `PENDING_CONFIRMATION` 来源。      |
-| `assignments`       | 已实现   | 统一人日账本；人工来源默认锁定，同人同日及普通日同岗位唯一。                |
-| `monthly_exclusions`| 已实现   | 月份与教师唯一，可保存自由文本原因，仅作为自动候选输入。                    |
+| 表                   | 状态     | 说明                                                                        |
+| -------------------- | -------- | --------------------------------------------------------------------------- |
+| `schema_migrations`  | 已实现   | `version` PK、`name` UNIQUE、`applied_at`。空库迁到 1；重复启动不重复插入。 |
+| `app_settings`       | 已建表   | `key` PK、`value`、`updated_at`。尚无业务读写。                             |
+| `probe_events`       | 开发探针 | 仅验证重启持久化，**不是**值班账本，Phase 1 不得当教师/排班表使用。         |
+| `teachers`           | 已实现   | 教师主档；UUID 主键，支持停用/恢复，重名不作为关联键。                      |
+| `semesters`          | 已实现   | 学期新建、选择、关闭/重开；合法日期与活动学期重叠在命令层校验。             |
+| `semester_teachers`  | 已实现   | 学期成员快照、楼层、大值班、参与状态与非负公平基线。                        |
+| `monthly_schedules`  | 已实现   | 学期内年月唯一；草稿/确认、确认时间和后续生成元数据已落地。                 |
+| `duty_dates`         | 已实现   | 日期类型、返校标记及 `AUTO` / `MANUAL` / `PENDING_CONFIRMATION` 来源。      |
+| `assignments`        | 已实现   | 统一人日账本；人工来源默认锁定，同人同日及普通日同岗位唯一。                |
+| `monthly_exclusions` | 已实现   | 月份与教师唯一，可保存自由文本原因，仅作为自动候选输入。                    |
 
 迁移 `004_assignments_exclusions.sql` 已添加账本与月度排除表、部分唯一索引和跨表校验触发器。非系部日大值班会建立 `department_mode = NONE` 日期并保持不占岗位；删除最后一项外部任务时清理该日期。月份必须与学期范围相交，日期必须同时落在月份和学期内。数据库文件：macOS 开发/安装后位于 `~/Library/Application Support/com.caihui.duty-roster/duty-roster.db`。启动时开启 `foreign_keys` 与 WAL，并执行 `PRAGMA integrity_check`。
 
@@ -262,7 +262,7 @@ interface ScheduleIssue {
 }
 ```
 
-**Phase 4 实现状态：** `src/domain/scheduling/` 已提供版本 1 输入/输出 DTO、规则版本 1.1 的 `AssignmentExplanation`、可定位 `ScheduleIssue`、可行性结果、生成结果与派生统计。输入指纹使用规范化后的语义输入；`REGENERATE_AUTO` 模式会在指纹和工作账本中剔除旧自动记录并保留人工记录。上述类型仅存在于纯 TypeScript 领域层，本阶段未新增表或迁移，数据库最新模式版本仍为 4；Phase 5 负责仓储 DTO 转换和事务写入。
+**Phase 5 实现状态：** `src/domain/scheduling/` 继续提供版本 1 DTO 与规则版本 1.1。应用层把仓储上下文转换为引擎输入；Rust 读取当前月、学期教师、跨月历史、排除和已有账本并生成确定性快照令牌。自动保存会在单个事务内复核令牌，按模式补空或替换 `source = AUTO`，保存 `input_fingerprint`、递增 `generation_revision` 并写入 `explanation_json`；输入过期或任一插入失败则整笔回滚。Phase 5 未新增表或迁移，数据库最新模式版本仍为 4。
 
 ## 7. 状态与事务
 

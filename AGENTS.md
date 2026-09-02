@@ -4,8 +4,8 @@
 
 ## 当前状态
 
-- 已完成：Phase 0、Phase 1、Phase 2、Phase 3、Phase 4（done，2026-09-02）
-- 进行中 / 下一个：Phase 5（todo）— 自动排班工作台与解释
+- 已完成：Phase 0、Phase 1、Phase 2、Phase 3、Phase 4、Phase 5（done，2026-09-02）
+- 进行中 / 下一个：Phase 6（todo）— 人工调整、完整状态流与历史编辑
 - 不要重做已标 `done` 的 Phase，除非关闭记录里的遗留问题明确要求返工
 
 ## 开始前

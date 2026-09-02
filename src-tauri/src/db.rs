@@ -208,10 +208,52 @@ pub struct AssignmentView {
     pub locked: bool,
     pub occupies_department_slot: bool,
     pub slot_floor: Option<String>,
+    pub explanation_json: Option<String>,
     pub note: Option<String>,
     pub is_special_return: Option<bool>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleHistoryDuty {
+    pub teacher_id: String,
+    pub duty_date: String,
+    pub is_special_return: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleAutomationContext {
+    pub snapshot_token: String,
+    pub schedule: MonthlySchedule,
+    pub teachers: Vec<SemesterTeacherView>,
+    pub duty_dates: Vec<DutyDate>,
+    pub assignments: Vec<AssignmentView>,
+    pub history: Vec<ScheduleHistoryDuty>,
+    pub excluded_teacher_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedAutoAssignmentRequest {
+    pub id: String,
+    pub duty_date_id: String,
+    pub teacher_id: String,
+    pub semester_teacher_id: String,
+    pub slot_floor: String,
+    pub explanation_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAutoAssignmentsRequest {
+    pub schedule_id: String,
+    pub generation_mode: String,
+    pub expected_snapshot_token: String,
+    pub input_fingerprint: String,
+    pub assignments: Vec<GeneratedAutoAssignmentRequest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1086,6 +1128,111 @@ impl AppDb {
         Ok(result)
     }
 
+    pub fn schedule_automation_context(
+        &self,
+        schedule_id: &str,
+    ) -> Result<ScheduleAutomationContext, AppError> {
+        let conn = self.lock()?;
+        schedule_automation_context_conn(&conn, schedule_id)
+    }
+
+    pub fn save_auto_assignments(
+        &self,
+        request: &SaveAutoAssignmentsRequest,
+    ) -> Result<Vec<AssignmentView>, AppError> {
+        validate_id(&request.schedule_id, "schedule id")?;
+        if !matches!(
+            request.generation_mode.as_str(),
+            "FILL_VACANCIES" | "REGENERATE_AUTO"
+        ) {
+            return Err(AppError::Invalid(
+                "invalid automatic generation mode".into(),
+            ));
+        }
+        if request.input_fingerprint.trim().is_empty() {
+            return Err(AppError::Invalid("input fingerprint is required".into()));
+        }
+        for assignment in &request.assignments {
+            validate_id(&assignment.id, "automatic assignment id")?;
+            validate_id(&assignment.duty_date_id, "duty date id")?;
+            validate_id(&assignment.teacher_id, "teacher id")?;
+            validate_id(&assignment.semester_teacher_id, "semester teacher id")?;
+            validate_floor(&assignment.slot_floor)?;
+            let explanation: serde_json::Value = serde_json::from_str(&assignment.explanation_json)
+                .map_err(|_| {
+                    AppError::Invalid("automatic explanation must be valid JSON".into())
+                })?;
+            if !explanation.is_object() {
+                return Err(AppError::Invalid(
+                    "automatic explanation must be a JSON object".into(),
+                ));
+            }
+        }
+
+        let mut conn = self.lock()?;
+        let tx = conn.transaction()?;
+        require_editable_schedule(&tx, &request.schedule_id)?;
+        let current = schedule_automation_context_conn(&tx, &request.schedule_id)?;
+        if current.snapshot_token != request.expected_snapshot_token {
+            return Err(AppError::Invalid(
+                "排班输入已发生变化，请刷新可行性检查后重试".into(),
+            ));
+        }
+
+        if request.generation_mode == "REGENERATE_AUTO" {
+            tx.execute(
+                "DELETE FROM assignments WHERE schedule_id = ?1 AND source = 'AUTO'",
+                [&request.schedule_id],
+            )?;
+        }
+
+        for assignment in &request.assignments {
+            tx.execute(
+                "INSERT INTO assignments
+                 (id, schedule_id, duty_date_id, teacher_id, semester_teacher_id, duty_type,
+                  source, locked, occupies_department_slot, slot_floor, explanation_json, note,
+                  created_at, updated_at)
+                 SELECT ?1, ?2, dd.id, ?3, st.id, 'NORMAL_DUTY', 'AUTO', 0, 1, ?5, ?6, NULL,
+                        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                 FROM duty_dates dd
+                 JOIN monthly_schedules ms ON ms.id = dd.schedule_id
+                 JOIN semester_teachers st ON st.semester_id = ms.semester_id
+                 JOIN teachers t ON t.id = st.teacher_id
+                 WHERE dd.id = ?4 AND dd.schedule_id = ?2 AND dd.department_mode = 'NORMAL'
+                   AND st.id = ?7 AND st.teacher_id = ?3 AND st.participates = 1 AND t.active = 1
+                   AND NOT EXISTS (
+                       SELECT 1 FROM monthly_exclusions me
+                       WHERE me.schedule_id = ?2 AND me.teacher_id = ?3
+                   )",
+                rusqlite::params![
+                    assignment.id,
+                    request.schedule_id,
+                    assignment.teacher_id,
+                    assignment.duty_date_id,
+                    assignment.slot_floor,
+                    assignment.explanation_json,
+                    assignment.semester_teacher_id,
+                ],
+            )?;
+            if tx.changes() == 0 {
+                return Err(AppError::Invalid(
+                    "automatic assignment no longer matches the schedule input".into(),
+                ));
+            }
+        }
+        tx.execute(
+            "UPDATE monthly_schedules
+             SET generation_revision = generation_revision + 1,
+                 input_fingerprint = ?2,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE id = ?1",
+            rusqlite::params![request.schedule_id, request.input_fingerprint],
+        )?;
+        tx.commit()?;
+        list_assignments_conn(&conn, &request.schedule_id)
+    }
+
     fn get_semester_teacher(
         &self,
         semester_id: &str,
@@ -1245,10 +1392,11 @@ fn assignment_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AssignmentVi
         locked: row.get(11)?,
         occupies_department_slot: row.get(12)?,
         slot_floor: row.get(13)?,
-        note: row.get(14)?,
-        is_special_return: row.get(15)?,
-        created_at: row.get(16)?,
-        updated_at: row.get(17)?,
+        explanation_json: row.get(14)?,
+        note: row.get(15)?,
+        is_special_return: row.get(16)?,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
     })
 }
 
@@ -1260,7 +1408,7 @@ fn list_assignments_conn(
         "SELECT a.id, a.schedule_id, a.duty_date_id, dd.duty_date, dd.department_mode,
                 a.teacher_id, a.semester_teacher_id, st.display_name_snapshot, st.floor_group,
                 a.duty_type, a.source, a.locked, a.occupies_department_slot, a.slot_floor,
-                a.note, dd.is_special_return, a.created_at, a.updated_at
+                a.explanation_json, a.note, dd.is_special_return, a.created_at, a.updated_at
          FROM assignments a
          JOIN duty_dates dd ON dd.id = a.duty_date_id
          JOIN semester_teachers st ON st.id = a.semester_teacher_id
@@ -1269,6 +1417,85 @@ fn list_assignments_conn(
     )?;
     let rows = stmt.query_map([schedule_id], assignment_from_row)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+fn schedule_automation_context_conn(
+    conn: &Connection,
+    schedule_id: &str,
+) -> Result<ScheduleAutomationContext, AppError> {
+    let schedule = query_monthly_schedule(conn, schedule_id)?;
+    let teachers = {
+        let mut stmt = conn.prepare(
+            "SELECT st.id, st.semester_id, st.teacher_id, t.name, t.active, t.note,
+                    st.floor_group, st.is_major_duty, st.participates,
+                    st.initial_fairness_count, st.display_name_snapshot,
+                    (SELECT COUNT(DISTINCT dd.duty_date)
+                     FROM assignments a
+                     JOIN duty_dates dd ON dd.id = a.duty_date_id
+                     JOIN monthly_schedules ams ON ams.id = a.schedule_id
+                     WHERE a.teacher_id = st.teacher_id
+                       AND ams.semester_id = st.semester_id)
+             FROM semester_teachers st
+             JOIN teachers t ON t.id = st.teacher_id
+             WHERE st.semester_id = ?1
+             ORDER BY st.teacher_id, st.id",
+        )?;
+        let rows = stmt.query_map([&schedule.semester_id], semester_teacher_from_row)?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    let duty_dates = list_duty_dates_conn(conn, schedule_id)?;
+    let assignments = list_assignments_conn(conn, schedule_id)?;
+    let history = {
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT a.teacher_id, dd.duty_date, COALESCE(dd.is_special_return, 0)
+             FROM assignments a
+             JOIN duty_dates dd ON dd.id = a.duty_date_id
+             JOIN monthly_schedules ms ON ms.id = a.schedule_id
+             WHERE ms.semester_id = ?1 AND ms.id <> ?2
+             ORDER BY dd.duty_date, a.teacher_id",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![&schedule.semester_id, schedule_id],
+            |row| {
+                Ok(ScheduleHistoryDuty {
+                    teacher_id: row.get(0)?,
+                    duty_date: row.get(1)?,
+                    is_special_return: row.get(2)?,
+                })
+            },
+        )?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    let excluded_teacher_ids = {
+        let mut stmt = conn.prepare(
+            "SELECT teacher_id FROM monthly_exclusions
+             WHERE schedule_id = ?1 ORDER BY teacher_id",
+        )?;
+        let rows = stmt.query_map([schedule_id], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    let mut context = ScheduleAutomationContext {
+        snapshot_token: String::new(),
+        schedule,
+        teachers,
+        duty_dates,
+        assignments,
+        history,
+        excluded_teacher_ids,
+    };
+    let canonical = serde_json::to_string(&context)
+        .map_err(|error| AppError::Database(format!("serialize schedule snapshot: {error}")))?;
+    context.snapshot_token = fnv1a64(&canonical);
+    Ok(context)
+}
+
+fn fnv1a64(value: &str) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 fn list_monthly_exclusions_conn(
@@ -2410,5 +2637,151 @@ mod tests {
         let member = reopened.list_semester_teachers("s1").unwrap().remove(0);
         assert_eq!(member.actual_semester_count, 1);
         assert_eq!(member.effective_semester_count, 1);
+    }
+
+    fn auto_assignment(
+        id: &str,
+        teacher_id: &str,
+        semester_teacher_id: &str,
+        floor: &str,
+    ) -> GeneratedAutoAssignmentRequest {
+        GeneratedAutoAssignmentRequest {
+            id: id.into(),
+            duty_date_id: "d1".into(),
+            teacher_id: teacher_id.into(),
+            semester_teacher_id: semester_teacher_id.into(),
+            slot_floor: floor.into(),
+            explanation_json: r#"{"ruleVersion":"1.1","monthlyRound":1}"#.into(),
+        }
+    }
+
+    #[test]
+    fn automatic_save_is_atomic_and_regeneration_preserves_manual_records_r015_r037_r041() {
+        let (_dir, db) = temp_db();
+        db.create_semester(&semester_request(
+            "s1",
+            "semester",
+            "2026-09-01",
+            "2027-01-31",
+        ))
+        .unwrap();
+        db.save_teacher(&teacher_request("t1", "st1", "s1", "Manual Lower"))
+            .unwrap();
+        let mut upper = teacher_request("t2", "st2", "s1", "Auto Upper");
+        upper.floor_group = "UPPER".into();
+        db.save_teacher(&upper).unwrap();
+        let mut other_upper = teacher_request("t3", "st3", "s1", "Other Upper");
+        other_upper.floor_group = "UPPER".into();
+        db.save_teacher(&other_upper).unwrap();
+        db.create_monthly_schedule(&schedule_request("sep", "s1", "2026-09"))
+            .unwrap();
+        db.save_duty_date(&duty_date_request("d1", "sep", "2026-09-10", "NORMAL"))
+            .unwrap();
+        db.save_manual_assignment(&assignment_request(
+            "manual-a1",
+            "unused",
+            "sep",
+            "2026-09-10",
+            "t1",
+            "st1",
+            "NORMAL_DUTY",
+            Some("LOWER"),
+        ))
+        .unwrap();
+
+        let context = db.schedule_automation_context("sep").unwrap();
+        db.save_auto_assignments(&SaveAutoAssignmentsRequest {
+            schedule_id: "sep".into(),
+            generation_mode: "FILL_VACANCIES".into(),
+            expected_snapshot_token: context.snapshot_token,
+            input_fingerprint: "fingerprint-1".into(),
+            assignments: vec![auto_assignment("auto-a1", "t2", "st2", "UPPER")],
+        })
+        .unwrap();
+        let saved = db.list_assignments("sep").unwrap();
+        assert_eq!(saved.len(), 2);
+        assert_eq!(
+            saved
+                .iter()
+                .find(|item| item.source == "MANUAL")
+                .unwrap()
+                .id,
+            "manual-a1"
+        );
+        assert!(saved
+            .iter()
+            .find(|item| item.source == "AUTO")
+            .unwrap()
+            .explanation_json
+            .is_some());
+
+        let context = db.schedule_automation_context("sep").unwrap();
+        let failed = db.save_auto_assignments(&SaveAutoAssignmentsRequest {
+            schedule_id: "sep".into(),
+            generation_mode: "REGENERATE_AUTO".into(),
+            expected_snapshot_token: context.snapshot_token,
+            input_fingerprint: "fingerprint-2".into(),
+            assignments: vec![
+                auto_assignment("auto-a2", "t2", "st2", "UPPER"),
+                auto_assignment("auto-a3", "t3", "st3", "UPPER"),
+            ],
+        });
+        assert!(failed.is_err());
+        let after_failure = db.list_assignments("sep").unwrap();
+        assert!(after_failure.iter().any(|item| item.id == "manual-a1"));
+        assert!(after_failure.iter().any(|item| item.id == "auto-a1"));
+        assert!(!after_failure.iter().any(|item| item.id == "auto-a2"));
+
+        let context = db.schedule_automation_context("sep").unwrap();
+        db.save_auto_assignments(&SaveAutoAssignmentsRequest {
+            schedule_id: "sep".into(),
+            generation_mode: "REGENERATE_AUTO".into(),
+            expected_snapshot_token: context.snapshot_token,
+            input_fingerprint: "fingerprint-2".into(),
+            assignments: vec![auto_assignment("auto-a2", "t2", "st2", "UPPER")],
+        })
+        .unwrap();
+        let regenerated = db.list_assignments("sep").unwrap();
+        assert!(regenerated.iter().any(|item| item.id == "manual-a1"));
+        assert!(regenerated.iter().any(|item| item.id == "auto-a2"));
+        assert!(!regenerated.iter().any(|item| item.id == "auto-a1"));
+        let schedule = query_monthly_schedule(&db.lock().unwrap(), "sep").unwrap();
+        assert_eq!(schedule.generation_revision, 2);
+        assert_eq!(schedule.input_fingerprint.as_deref(), Some("fingerprint-2"));
+    }
+
+    #[test]
+    fn automatic_save_rejects_a_stale_snapshot_before_writing() {
+        let (_dir, db) = temp_db();
+        db.create_semester(&semester_request(
+            "s1",
+            "semester",
+            "2026-09-01",
+            "2027-01-31",
+        ))
+        .unwrap();
+        db.save_teacher(&teacher_request("t1", "st1", "s1", "Teacher"))
+            .unwrap();
+        db.create_monthly_schedule(&schedule_request("sep", "s1", "2026-09"))
+            .unwrap();
+        db.save_duty_date(&duty_date_request("d1", "sep", "2026-09-10", "NORMAL"))
+            .unwrap();
+        let stale = db.schedule_automation_context("sep").unwrap();
+        db.save_monthly_exclusion(&SaveMonthlyExclusionRequest {
+            id: "e1".into(),
+            schedule_id: "sep".into(),
+            teacher_id: "t1".into(),
+            reason: None,
+        })
+        .unwrap();
+        let result = db.save_auto_assignments(&SaveAutoAssignmentsRequest {
+            schedule_id: "sep".into(),
+            generation_mode: "FILL_VACANCIES".into(),
+            expected_snapshot_token: stale.snapshot_token,
+            input_fingerprint: "fingerprint".into(),
+            assignments: vec![],
+        });
+        assert!(matches!(result, Err(AppError::Invalid(message)) if message.contains("发生变化")));
+        assert!(db.list_assignments("sep").unwrap().is_empty());
     }
 }

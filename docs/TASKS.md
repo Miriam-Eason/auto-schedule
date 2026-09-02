@@ -1,8 +1,8 @@
 # 财会系值班排班系统：开发任务与验收计划
 
 > 文档版本：1.1  
-> 当前阶段：Phase 5（todo）
-> 上一完成阶段：Phase 4（done，2026-09-02）
+> 当前阶段：Phase 6（todo）
+> 上一完成阶段：Phase 5（done，2026-09-02）
 > 使用方式：每次只执行一个 Phase；先阅读全部文档和 `AGENTS.md`，再按本文件交付。结束时必须把状态从 todo 改为 done，并更新 [PHASE_STATUS.md](./PHASE_STATUS.md)。  
 > 关联文档：[PRD.md](./PRD.md)、[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[DATA_MODEL.md](./DATA_MODEL.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
@@ -213,7 +213,7 @@ duty-roster/
 
 完成项：版本 1 输入/输出 DTO、纯 TypeScript 账本与可行性、R025–R037 优先级链、R046 解释、R047–R050 引擎问题项、语义输入指纹及稳定决胜。BR-T01–BR-T15 和 Phase 4 补充边界均已测试；相同输入重复 100 次以及带旧自动结果的重新生成均复现一致。测试：Vitest 38、cargo test 18、typecheck/build/format 均通过。无数据库迁移、UI 或仓储接入；这些严格留给 Phase 5。
 
-## Phase 5：自动排班工作台与解释 【todo】
+## Phase 5：自动排班工作台与解释 【done】
 
 ### 目标
 
@@ -234,6 +234,12 @@ duty-roster/
 - 数据库写入失败时原排班不变。
 - 相同输入重新生成结果相同；人工任务 ID 与内容不变。
 - 警告可点击定位，解释文本非技术用户可理解。
+
+### 状态
+
+**done**（2026-09-02）。关闭记录见 [PHASE_STATUS.md](./PHASE_STATUS.md#phase-5-关闭记录done)。
+
+完成项：分步工作台、仓储快照到版本 1 DTO 转换、可行性展示、原子自动保存、补齐空缺/重新生成、解释快照、来源标识与可定位问题；确定性快照令牌阻止过期输入覆盖，事务失败完整回滚并保留人工记录。测试：Vitest 40、cargo test 20、typecheck/build/format/clippy 均通过；模式版本仍为 4。Phase 6 的换人、移动和完整确认知情流程未提前实施。
 
 ## Phase 6：人工调整、完整状态流与历史编辑 【todo】
 
@@ -346,5 +352,5 @@ duty-roster/
 
 ```text
 阅读 docs/PRD.md、docs/BUSINESS_RULES.md、docs/DATA_MODEL.md、docs/TASKS.md、docs/PHASE_STATUS.md 以及仓库 AGENTS.md。
-只实施 TASKS.md 的 Phase 5：自动排班工作台与解释。把 Phase 4 的版本 1 引擎 DTO 接入现有仓储数据，生成前展示可行性，在单个 Rust/SQLite 事务中保存自动结果；实现“补齐空缺”和“重新自动排班”，后者只替换自动记录并保留人工任务。展示岗位来源、统计、解释和可定位警告，处理重复点击、事务失败与过期输入。不要提前实施 Phase 6 的人工换人或完整确认流程。完成后按 AGENTS.md 关闭 Phase 5 并同步文档，等待验收。
+只实施 TASKS.md 的 Phase 6：人工调整、完整状态流与历史编辑。支持换人、添加、删除和移动，调整后只重算统计/问题且不自动洗牌；空缺只提示，必须显式补齐。完成确认前岗位完整性、ERROR 阻断和 WARNING 知情流程，保持已确认只读/撤回/再次确认，并验证历史修改影响后续公平统计但不重排既有月份。不要提前实施 Phase 7 的 Excel 导出或备份恢复。完成后按 AGENTS.md 关闭 Phase 6 并同步文档，等待验收。
 ```

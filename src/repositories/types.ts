@@ -164,10 +164,44 @@ export interface Assignment {
   locked: boolean;
   occupiesDepartmentSlot: boolean;
   slotFloor: FloorGroup | null;
+  explanationJson: string | null;
   note: string | null;
   isSpecialReturn: boolean | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ScheduleHistoryDuty {
+  teacherId: string;
+  dutyDate: string;
+  isSpecialReturn: boolean;
+}
+
+export interface ScheduleAutomationContext {
+  snapshotToken: string;
+  schedule: MonthlySchedule;
+  teachers: SemesterTeacher[];
+  dutyDates: DutyDate[];
+  assignments: Assignment[];
+  history: ScheduleHistoryDuty[];
+  excludedTeacherIds: string[];
+}
+
+export interface GeneratedAutoAssignmentRequest {
+  id: string;
+  dutyDateId: string;
+  teacherId: string;
+  semesterTeacherId: string;
+  slotFloor: FloorGroup;
+  explanationJson: string;
+}
+
+export interface SaveAutoAssignmentsRequest {
+  scheduleId: string;
+  generationMode: "FILL_VACANCIES" | "REGENERATE_AUTO";
+  expectedSnapshotToken: string;
+  inputFingerprint: string;
+  assignments: GeneratedAutoAssignmentRequest[];
 }
 
 export interface SaveManualAssignmentRequest {
@@ -240,4 +274,6 @@ export interface RosterRepository {
   saveMonthlyExclusion(request: SaveMonthlyExclusionRequest): Promise<MonthlyExclusion[]>;
   deleteMonthlyExclusion(scheduleId: string, teacherId: string): Promise<MonthlyExclusion[]>;
   getScheduleStatistics(scheduleId: string): Promise<TeacherDutyStatistics[]>;
+  getScheduleAutomationContext(scheduleId: string): Promise<ScheduleAutomationContext>;
+  saveAutoAssignments(request: SaveAutoAssignmentsRequest): Promise<Assignment[]>;
 }
