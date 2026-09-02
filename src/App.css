@@ -531,6 +531,44 @@ button.danger {
   margin-top: 16px;
 }
 
+.editing-banner {
+  margin: 0;
+  border-left: 3px solid #2f6f8f;
+  padding: 8px 10px;
+  color: #315f74;
+  background: #eef7fb;
+  font-size: 12px;
+}
+
+.assignment-form-actions,
+.row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.assignment-form-actions {
+  grid-column: auto;
+}
+
+.schedule-review {
+  margin-top: 20px;
+  border: 1px solid #dce3ea;
+  border-radius: 10px;
+  padding: 16px;
+  background: #fbfcfd;
+}
+
+.review-counts {
+  color: #526978;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.review-issue-list {
+  max-height: 280px;
+  overflow: auto;
+}
+
 .warning-tag {
   margin-left: 6px;
   background: #fff1cc;

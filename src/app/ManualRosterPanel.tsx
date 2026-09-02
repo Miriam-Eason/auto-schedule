@@ -54,6 +54,7 @@ export function ManualRosterPanel({
   const [dutyType, setDutyType] = useState<DutyType>("NORMAL_DUTY");
   const [slotFloor, setSlotFloor] = useState<FloorGroup>("LOWER");
   const [assignmentNote, setAssignmentNote] = useState("");
+  const [editingAssignment, setEditingAssignment] = useState<Assignment | null>(null);
   const [exclusionTeacherId, setExclusionTeacherId] = useState(members[0]?.teacherId ?? "");
   const [exclusionReason, setExclusionReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -99,8 +100,8 @@ export function ManualRosterPanel({
   );
 
   useEffect(() => {
-    if (selectedMember) setSlotFloor(selectedMember.floorGroup);
-  }, [selectedMember]);
+    if (selectedMember && !editingAssignment) setSlotFloor(selectedMember.floorGroup);
+  }, [editingAssignment, selectedMember]);
 
   async function refreshAfterMutation() {
     await load();
@@ -115,10 +116,16 @@ export function ManualRosterPanel({
       setNotice("非系部值班日只能录入大值班；请先在月历设置日期，或改选“大值班”。");
       return;
     }
+    const replacingSameTeacher = editingAssignment?.teacherId === teacherId;
     const warnings = manualAssignmentWarnings({
       isExcluded: exclusionIds.has(teacherId),
-      monthActualCount: selectedStatistics?.monthActualCount ?? 0,
-      dutyDates: selectedStatistics?.dutyDates ?? [],
+      monthActualCount: Math.max(
+        0,
+        (selectedStatistics?.monthActualCount ?? 0) - (replacingSameTeacher ? 1 : 0),
+      ),
+      dutyDates: (selectedStatistics?.dutyDates ?? []).filter(
+        (date) => !(replacingSameTeacher && date === editingAssignment?.dutyDate),
+      ),
       dutyDate,
       homeFloor: selectedMember.floorGroup,
       slotFloor,
@@ -133,8 +140,8 @@ export function ManualRosterPanel({
     setBusy(true);
     setNotice(null);
     try {
-      await repository.saveManualAssignment({
-        id: crypto.randomUUID(),
+      const request = {
+        id: editingAssignment?.id ?? crypto.randomUUID(),
         dutyDateId: crypto.randomUUID(),
         scheduleId: schedule.id,
         dutyDate,
@@ -143,13 +150,24 @@ export function ManualRosterPanel({
         dutyType,
         slotFloor: dateConfig?.departmentMode === "NORMAL" ? slotFloor : null,
         note: assignmentNote.trim() || null,
-      });
+      };
+      if (editingAssignment) {
+        await repository.adjustAssignment({
+          ...request,
+          assignmentId: editingAssignment.id,
+        });
+      } else {
+        await repository.saveManualAssignment(request);
+      }
       setAssignmentNote("");
+      setEditingAssignment(null);
       await refreshAfterMutation();
       setNotice(
         warnings.length > 0
-          ? `已保存，并显示 ${warnings.length} 项人工突破提示。`
-          : "人工固定排班已保存。",
+          ? `已${editingAssignment ? "调整" : "保存"}，并显示 ${warnings.length} 项人工突破提示。`
+          : editingAssignment
+            ? "目标记录已原子调整；其他自动岗位未改变，统计与问题已重算。"
+            : "人工固定排班已保存。",
       );
     } catch (error) {
       setNotice(errorMessage(error));
@@ -158,10 +176,25 @@ export function ManualRosterPanel({
     }
   }
 
+  function editAssignment(assignment: Assignment) {
+    setEditingAssignment(assignment);
+    setDutyDate(assignment.dutyDate);
+    setTeacherId(assignment.teacherId);
+    setDutyType(assignment.dutyType);
+    setSlotFloor(assignment.slotFloor ?? assignment.teacherFloor);
+    setAssignmentNote(assignment.note ?? "");
+    onLocateDate(assignment.dutyDate);
+    setNotice(
+      assignment.source === "AUTO"
+        ? "正在调整自动记录；保存后该记录会转为人工锁定，但保留原记录 ID。"
+        : "正在编辑人工记录。可以换人、改日期、移动岗位或修改任务。",
+    );
+  }
+
   async function deleteAssignment(assignment: Assignment) {
     if (
       !window.confirm(
-        `删除 ${assignment.dutyDate} · ${assignment.teacherName} 的人工值班？统计将立即重算。`,
+        `删除 ${assignment.dutyDate} · ${assignment.teacherName} 的${assignment.source === "AUTO" ? "自动" : "人工"}值班？只会留下空缺并重算统计，不会自动补人。`,
       )
     )
       return;
@@ -279,7 +312,13 @@ export function ManualRosterPanel({
         </form>
 
         <form className="ledger-form" onSubmit={(event) => void saveAssignment(event)}>
-          <h4>3 固定安排</h4>
+          <h4>{editingAssignment ? "3 调整目标记录" : "3 固定安排"}</h4>
+          {editingAssignment ? (
+            <p className="editing-banner">
+              仅修改 {editingAssignment.dutyDate} · {editingAssignment.teacherName}
+              ；不会自动重排其他岗位。
+            </p>
+          ) : null}
           <div className="form-two-columns">
             <label>
               日期
@@ -348,9 +387,24 @@ export function ManualRosterPanel({
               onChange={(event) => setAssignmentNote(event.currentTarget.value)}
             />
           </label>
-          <button disabled={!editable || busy || !teacherId || !dutyDate} type="submit">
-            添加人工固定排班
-          </button>
+          <div className="form-actions assignment-form-actions">
+            <button disabled={!editable || busy || !teacherId || !dutyDate} type="submit">
+              {editingAssignment ? "保存单点调整" : "添加人工固定排班"}
+            </button>
+            {editingAssignment ? (
+              <button
+                className="secondary"
+                disabled={busy}
+                type="button"
+                onClick={() => {
+                  setEditingAssignment(null);
+                  setAssignmentNote("");
+                }}
+              >
+                取消调整
+              </button>
+            ) : null}
+          </div>
         </form>
       </div>
 
@@ -396,7 +450,15 @@ export function ManualRosterPanel({
                   <td>{item.isSpecialReturn ? "特殊返校" : "—"}</td>
                   <td>{item.note ?? "—"}</td>
                   <td>
-                    {item.source === "MANUAL" ? (
+                    <div className="row-actions">
+                      <button
+                        className="text-button"
+                        disabled={!editable || busy}
+                        type="button"
+                        onClick={() => editAssignment(item)}
+                      >
+                        调整
+                      </button>
                       <button
                         className="text-button danger-text"
                         disabled={!editable || busy}
@@ -405,9 +467,7 @@ export function ManualRosterPanel({
                       >
                         删除
                       </button>
-                    ) : (
-                      "由自动操作管理"
-                    )}
+                    </div>
                   </td>
                 </tr>
               ))

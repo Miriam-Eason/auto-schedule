@@ -1,7 +1,7 @@
 # 财会系值班排班系统：数据模型
 
 > 文档版本：1.1  
-> 状态：开发基线；模式版本 4 已落地，Phase 4–5 均无模式变更（Phase 5 done，2026-09-02）
+> 状态：开发基线；模式版本 4 已落地，Phase 4–6 均无模式变更（Phase 6 done，2026-09-02）
 > 关联文档：[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[PRD.md](./PRD.md)、[TASKS.md](./TASKS.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
 ## 1. 建模原则
@@ -263,6 +263,8 @@ interface ScheduleIssue {
 ```
 
 **Phase 5 实现状态：** `src/domain/scheduling/` 继续提供版本 1 DTO 与规则版本 1.1。应用层把仓储上下文转换为引擎输入；Rust 读取当前月、学期教师、跨月历史、排除和已有账本并生成确定性快照令牌。自动保存会在单个事务内复核令牌，按模式补空或替换 `source = AUTO`，保存 `input_fingerprint`、递增 `generation_revision` 并写入 `explanation_json`；输入过期或任一插入失败则整笔回滚。Phase 5 未新增表或迁移，数据库最新模式版本仍为 4。
+
+**Phase 6 实现状态：** 单点调整复用 `assignments` 现有字段，不新增表。换人、改日期/岗位、改任务会在事务内更新目标记录，保留其 `id`，并明确转换为 `source = MANUAL`、`locked = 1`、清除旧自动解释；其他记录不更新。删除可作用于人工或自动记录，只留下空缺。确认前复核由当前账本即时派生，不持久化问题缓存；确认事务内再次检查 `ERROR` / `WARNING`，知情参数只允许放行警告。历史调整后统计仍按第 5 节查询口径重算。数据库最新模式版本保持 4。
 
 ## 7. 状态与事务
 

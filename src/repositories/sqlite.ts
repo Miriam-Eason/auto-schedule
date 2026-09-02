@@ -26,6 +26,9 @@ import {
   type TeacherDutyStatistics,
   type ScheduleAutomationContext,
   type SaveAutoAssignmentsRequest,
+  type AdjustAssignmentRequest,
+  type ConfirmMonthlyScheduleRequest,
+  type ScheduleReview,
 } from "./types";
 
 function toAppError(error: unknown): AppError {
@@ -129,6 +132,14 @@ export class SqliteRosterRepository implements RosterRepository {
     return invokeRoster("monthly_schedule_set_status", { id, status });
   }
 
+  reviewSchedule(scheduleId: string): Promise<ScheduleReview> {
+    return invokeRoster("schedule_review", { scheduleId });
+  }
+
+  confirmMonthlySchedule(request: ConfirmMonthlyScheduleRequest): Promise<MonthlySchedule> {
+    return invokeRoster("monthly_schedule_confirm", { request });
+  }
+
   listDutyDates(scheduleId: string): Promise<DutyDate[]> {
     return invokeRoster("duty_date_list", { scheduleId });
   }
@@ -155,6 +166,10 @@ export class SqliteRosterRepository implements RosterRepository {
 
   saveManualAssignment(request: SaveManualAssignmentRequest): Promise<Assignment[]> {
     return invokeRoster("assignment_save_manual", { request });
+  }
+
+  adjustAssignment(request: AdjustAssignmentRequest): Promise<Assignment[]> {
+    return invokeRoster("assignment_adjust", { request });
   }
 
   deleteAssignment(scheduleId: string, assignmentId: string): Promise<Assignment[]> {

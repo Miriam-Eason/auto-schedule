@@ -1,8 +1,8 @@
 # 财会系值班排班系统：开发任务与验收计划
 
 > 文档版本：1.1  
-> 当前阶段：Phase 6（todo）
-> 上一完成阶段：Phase 5（done，2026-09-02）
+> 当前阶段：Phase 7（todo）
+> 上一完成阶段：Phase 6（done，2026-09-02）
 > 使用方式：每次只执行一个 Phase；先阅读全部文档和 `AGENTS.md`，再按本文件交付。结束时必须把状态从 todo 改为 done，并更新 [PHASE_STATUS.md](./PHASE_STATUS.md)。  
 > 关联文档：[PRD.md](./PRD.md)、[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[DATA_MODEL.md](./DATA_MODEL.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
@@ -241,7 +241,7 @@ duty-roster/
 
 完成项：分步工作台、仓储快照到版本 1 DTO 转换、可行性展示、原子自动保存、补齐空缺/重新生成、解释快照、来源标识与可定位问题；确定性快照令牌阻止过期输入覆盖，事务失败完整回滚并保留人工记录。测试：Vitest 40、cargo test 20、typecheck/build/format/clippy 均通过；模式版本仍为 4。Phase 6 的换人、移动和完整确认知情流程未提前实施。
 
-## Phase 6：人工调整、完整状态流与历史编辑 【todo】
+## Phase 6：人工调整、完整状态流与历史编辑 【done】
 
 ### 目标
 
@@ -262,6 +262,12 @@ duty-roster/
 - 更换一个岗位后，其他自动岗位记录逐条不变。
 - 有 `ERROR` 不能确认；只有 `WARNING` 时可知情确认。
 - 修改历史月份后，后续月份统计刷新但既有排班不自动洗牌。
+
+### 状态
+
+**done**（2026-09-02）。关闭记录见 [PHASE_STATUS.md](./PHASE_STATUS.md#phase-6-关闭记录done)。
+
+完成项：人工/自动目标记录的换人、改日期、移动岗位、改任务和删除；目标调整保留 ID、转为人工锁定，其他自动记录不变；删除只产生空缺。新增账本复核与可定位问题清单，`ERROR` 阻断确认、`WARNING` 知情确认，已确认只读/撤回/再次确认闭环；历史调整会刷新后续统计而不重排后续月份。测试：Vitest 40、cargo test 23、typecheck/build/format/clippy 均通过；模式版本仍为 4。
 
 ## Phase 7：Excel 导出、备份与恢复 【todo】
 
@@ -331,7 +337,7 @@ duty-roster/
 | ------------- | ---------- | ---- | ---------------------------------- |
 | M0 技术可行   | 0          | done | 桌面壳与持久化成立。               |
 | M1 可人工排班 | 1–3        | done | 可用真实数据人工完成并保存一张表。 |
-| M2 可自动排班 | 4–6        | todo | 算法、解释、调整与确认闭环。       |
+| M2 可自动排班 | 4–6        | done | 算法、解释、调整与确认闭环。       |
 | M3 可安全交付 | 7–8        | todo | 导出、备份、真实数据验证。         |
 | M4 跨平台发布 | 9          | todo | macOS 与 Windows 安装包。          |
 
@@ -352,5 +358,5 @@ duty-roster/
 
 ```text
 阅读 docs/PRD.md、docs/BUSINESS_RULES.md、docs/DATA_MODEL.md、docs/TASKS.md、docs/PHASE_STATUS.md 以及仓库 AGENTS.md。
-只实施 TASKS.md 的 Phase 6：人工调整、完整状态流与历史编辑。支持换人、添加、删除和移动，调整后只重算统计/问题且不自动洗牌；空缺只提示，必须显式补齐。完成确认前岗位完整性、ERROR 阻断和 WARNING 知情流程，保持已确认只读/撤回/再次确认，并验证历史修改影响后续公平统计但不重排既有月份。不要提前实施 Phase 7 的 Excel 导出或备份恢复。完成后按 AGENTS.md 关闭 Phase 6 并同步文档，等待验收。
+只实施 TASKS.md 的 Phase 7：Excel 导出、备份与恢复。先读取 `reference/排班导出模版.xlsx` 并锁定普通日、集中日、多任务标签和中文日期的字段映射；只允许导出已确认月份。实现文件选择、失败不影响账本，以及带应用/模式版本的 SQLite 一致性备份、恢复前校验与覆盖预览、失败保留原数据库、成功后完整性检查。用全新测试数据目录完成恢复演练。不要提前实施 Phase 8 的真实数据体验收尾。完成后按 AGENTS.md 关闭 Phase 7 并同步文档，等待验收。
 ```

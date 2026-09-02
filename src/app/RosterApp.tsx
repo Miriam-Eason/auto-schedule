@@ -156,7 +156,7 @@ export function RosterApp({ repository }: RosterAppProps) {
             按步骤选择日期、排除人员、录入固定任务，再检查容量并生成可解释的自动排班。
           </p>
         </div>
-        <span className="phase-badge">Phase 5</span>
+        <span className="phase-badge">Phase 6</span>
       </header>
 
       {notice ? (

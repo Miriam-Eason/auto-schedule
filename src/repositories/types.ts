@@ -216,6 +216,36 @@ export interface SaveManualAssignmentRequest {
   note: string | null;
 }
 
+export interface AdjustAssignmentRequest extends SaveManualAssignmentRequest {
+  assignmentId: string;
+}
+
+export type ScheduleReviewSeverity = "INFO" | "WARNING" | "ERROR";
+
+export interface ScheduleReviewIssue {
+  code: string;
+  severity: ScheduleReviewSeverity;
+  message: string;
+  scheduleId: string;
+  dutyDate: string | null;
+  teacherId: string | null;
+  slotFloor: FloorGroup | null;
+  suggestedAction: string | null;
+}
+
+export interface ScheduleReview {
+  issues: ScheduleReviewIssue[];
+  errorCount: number;
+  warningCount: number;
+  infoCount: number;
+  canConfirm: boolean;
+}
+
+export interface ConfirmMonthlyScheduleRequest {
+  scheduleId: string;
+  acknowledgeWarnings: boolean;
+}
+
 export interface MonthlyExclusion {
   id: string;
   scheduleId: string;
@@ -259,6 +289,8 @@ export interface RosterRepository {
   listMonthlySchedules(semesterId: string): Promise<MonthlySchedule[]>;
   createMonthlySchedule(request: CreateMonthlyScheduleRequest): Promise<MonthlySchedule>;
   setMonthlyScheduleStatus(id: string, status: ScheduleStatus): Promise<MonthlySchedule>;
+  reviewSchedule(scheduleId: string): Promise<ScheduleReview>;
+  confirmMonthlySchedule(request: ConfirmMonthlyScheduleRequest): Promise<MonthlySchedule>;
   listDutyDates(scheduleId: string): Promise<DutyDate[]>;
   saveDutyDate(request: SaveDutyDateRequest): Promise<DutyDate[]>;
   deleteDutyDate(scheduleId: string, dutyDate: string): Promise<DutyDate[]>;
@@ -269,6 +301,7 @@ export interface RosterRepository {
   ): Promise<DutyDate[]>;
   listAssignments(scheduleId: string): Promise<Assignment[]>;
   saveManualAssignment(request: SaveManualAssignmentRequest): Promise<Assignment[]>;
+  adjustAssignment(request: AdjustAssignmentRequest): Promise<Assignment[]>;
   deleteAssignment(scheduleId: string, assignmentId: string): Promise<Assignment[]>;
   listMonthlyExclusions(scheduleId: string): Promise<MonthlyExclusion[]>;
   saveMonthlyExclusion(request: SaveMonthlyExclusionRequest): Promise<MonthlyExclusion[]>;

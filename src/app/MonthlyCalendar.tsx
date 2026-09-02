@@ -6,6 +6,7 @@ import type {
   DutyDate,
   MonthlySchedule,
   RosterRepository,
+  ScheduleReview,
   Semester,
   SemesterTeacher,
 } from "../repositories/types";
@@ -53,6 +54,7 @@ export function MonthlyCalendar({
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
   const [dates, setDates] = useState<DutyDate[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [review, setReview] = useState<ScheduleReview | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [newMonth, setNewMonth] = useState(semester.startDate.slice(0, 7));
   const [busy, setBusy] = useState(false);
@@ -87,13 +89,18 @@ export function MonthlyCalendar({
       const nextId = nextSchedules.some((item) => item.id === preferredId)
         ? (preferredId ?? null)
         : (nextSchedules[nextSchedules.length - 1]?.id ?? null);
-      const [nextDates, nextAssignments] = nextId
-        ? await Promise.all([repository.listDutyDates(nextId), repository.listAssignments(nextId)])
-        : [[], []];
+      const [nextDates, nextAssignments, nextReview] = nextId
+        ? await Promise.all([
+            repository.listDutyDates(nextId),
+            repository.listAssignments(nextId),
+            repository.reviewSchedule(nextId),
+          ])
+        : [[], [], null];
       setSchedules(nextSchedules);
       setSelectedScheduleId(nextId);
       setDates(nextDates);
       setAssignments(nextAssignments);
+      setReview(nextReview);
       setSelectedDate((current) =>
         current && nextDates.some((date) => date.dutyDate === current) ? current : null,
       );
@@ -127,12 +134,14 @@ export function MonthlyCalendar({
     setNotice(null);
     try {
       setSelectedScheduleId(id);
-      const [nextDates, nextAssignments] = await Promise.all([
+      const [nextDates, nextAssignments, nextReview] = await Promise.all([
         repository.listDutyDates(id),
         repository.listAssignments(id),
+        repository.reviewSchedule(id),
       ]);
       setDates(nextDates);
       setAssignments(nextAssignments);
+      setReview(nextReview);
       setSelectedDate(null);
     } catch (error) {
       setNotice(errorMessage(error));
@@ -200,22 +209,44 @@ export function MonthlyCalendar({
 
   async function toggleStatus() {
     if (!schedule) return;
-    const next = schedule.status === "DRAFT" ? "CONFIRMED" : "DRAFT";
-    if (
-      !window.confirm(
-        next === "CONFIRMED"
-          ? `确认 ${schedule.yearMonth}？确认后月份只读。Phase 6 将补充岗位完整性检查。`
-          : `将 ${schedule.yearMonth} 撤回为草稿以继续编辑？`,
-      )
-    )
-      return;
-    await run(
-      async () => {
-        await repository.setMonthlyScheduleStatus(schedule.id, next);
+    if (schedule.status === "CONFIRMED") {
+      if (!window.confirm(`将 ${schedule.yearMonth} 撤回为草稿以继续编辑？既有排班不会被删除。`))
+        return;
+      await run(async () => {
+        await repository.setMonthlyScheduleStatus(schedule.id, "DRAFT");
         await load(schedule.id);
-      },
-      next === "CONFIRMED" ? "月份已确认并设为只读。" : "月份已撤回为草稿。",
-    );
+      }, "月份已撤回为草稿，可修改后再次确认。");
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
+    try {
+      const latestReview = await repository.reviewSchedule(schedule.id);
+      setReview(latestReview);
+      if (latestReview.errorCount > 0) {
+        setNotice(`确认被阻止：仍有 ${latestReview.errorCount} 项 ERROR。请按检查清单处理后重试。`);
+        return;
+      }
+      const warningText = latestReview.issues
+        .filter((issue) => issue.severity === "WARNING")
+        .map((issue) => `• ${issue.message}`)
+        .join("\n");
+      const prompt =
+        latestReview.warningCount > 0
+          ? `确认 ${schedule.yearMonth}？当前有 ${latestReview.warningCount} 项警告，请确认你已知情：\n\n${warningText}`
+          : `确认 ${schedule.yearMonth}？普通岗位完整且没有阻断错误；确认后月份只读。`;
+      if (!window.confirm(prompt)) return;
+      await repository.confirmMonthlySchedule({
+        scheduleId: schedule.id,
+        acknowledgeWarnings: latestReview.warningCount > 0,
+      });
+      await load(schedule.id);
+      setNotice("月份已通过完整性检查并确认；如需修改，请先撤回为草稿。");
+    } catch (error) {
+      setNotice(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -287,8 +318,8 @@ export function MonthlyCalendar({
             <li>1 选择日期</li>
             <li>2 排除人员</li>
             <li>3 固定安排</li>
-            <li className="active">4 自动排班</li>
-            <li>5 检查确认</li>
+            <li>4 自动排班</li>
+            <li className="active">5 检查确认</li>
           </ol>
           <div className="calendar-status">
             <span className={`status-chip ${schedule.status.toLowerCase()}`}>
@@ -422,6 +453,53 @@ export function MonthlyCalendar({
           ) : (
             <p className="calendar-hint">选择一个日期以新增、改类型或确认特殊返校标记。</p>
           )}
+          <section className="schedule-review" aria-labelledby="schedule-review-heading">
+            <div className="section-heading compact-heading">
+              <div>
+                <h3 id="schedule-review-heading">5 检查与确认</h3>
+                <p>每次调整后从账本重算；ERROR 阻止确认，WARNING 需明确知情。</p>
+              </div>
+              {review ? (
+                <span className="review-counts">
+                  ERROR {review.errorCount} · WARNING {review.warningCount} · INFO{" "}
+                  {review.infoCount}
+                </span>
+              ) : null}
+            </div>
+            <ul className="issue-list review-issue-list">
+              {review?.issues.length ? (
+                review.issues.map((issue, index) => (
+                  <li
+                    className={`issue-${issue.severity.toLowerCase()}`}
+                    key={`${issue.code}-${index}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!issue.dutyDate) return;
+                        setSelectedDate(issue.dutyDate);
+                        window.requestAnimationFrame(() =>
+                          document
+                            .getElementById(`calendar-day-${issue.dutyDate}`)
+                            ?.scrollIntoView({
+                              behavior: "smooth",
+                              block: "center",
+                            }),
+                        );
+                      }}
+                    >
+                      <span>
+                        {issue.severity} · {issue.code}
+                      </span>
+                      <strong>{issue.message}</strong>
+                    </button>
+                  </li>
+                ))
+              ) : (
+                <li className="empty-row">当前账本没有确认前问题。</li>
+              )}
+            </ul>
+          </section>
           <ManualRosterPanel
             schedule={schedule}
             dates={dates}

@@ -1,11 +1,12 @@
 use tauri::State;
 
 use crate::db::{
-    AppDb, AssignmentView, CreateMonthlyScheduleRequest, CreateSemesterRequest, DatabaseInfo,
-    DutyDate, ImportResult, ImportTeachersRequest, MonthlyExclusionView, MonthlySchedule,
-    ProbeEvent, SaveAutoAssignmentsRequest, SaveDutyDateRequest, SaveManualAssignmentRequest,
-    SaveMonthlyExclusionRequest, SaveTeacherRequest, ScheduleAutomationContext, Semester,
-    SemesterTeacherView, Teacher, TeacherDutyStatistics,
+    AdjustAssignmentRequest, AppDb, AssignmentView, ConfirmMonthlyScheduleRequest,
+    CreateMonthlyScheduleRequest, CreateSemesterRequest, DatabaseInfo, DutyDate, ImportResult,
+    ImportTeachersRequest, MonthlyExclusionView, MonthlySchedule, ProbeEvent,
+    SaveAutoAssignmentsRequest, SaveDutyDateRequest, SaveManualAssignmentRequest,
+    SaveMonthlyExclusionRequest, SaveTeacherRequest, ScheduleAutomationContext, ScheduleReview,
+    Semester, SemesterTeacherView, Teacher, TeacherDutyStatistics,
 };
 use crate::error::AppError;
 
@@ -117,6 +118,19 @@ pub fn monthly_schedule_set_status(
 }
 
 #[tauri::command]
+pub fn schedule_review(db: State<AppDb>, schedule_id: String) -> Result<ScheduleReview, AppError> {
+    db.review_schedule(&schedule_id)
+}
+
+#[tauri::command]
+pub fn monthly_schedule_confirm(
+    db: State<AppDb>,
+    request: ConfirmMonthlyScheduleRequest,
+) -> Result<MonthlySchedule, AppError> {
+    db.confirm_monthly_schedule(&request)
+}
+
+#[tauri::command]
 pub fn duty_date_list(db: State<AppDb>, schedule_id: String) -> Result<Vec<DutyDate>, AppError> {
     db.list_duty_dates(&schedule_id)
 }
@@ -162,6 +176,14 @@ pub fn assignment_save_manual(
     request: SaveManualAssignmentRequest,
 ) -> Result<Vec<AssignmentView>, AppError> {
     db.save_manual_assignment(&request)
+}
+
+#[tauri::command]
+pub fn assignment_adjust(
+    db: State<AppDb>,
+    request: AdjustAssignmentRequest,
+) -> Result<Vec<AssignmentView>, AppError> {
+    db.adjust_assignment(&request)
 }
 
 #[tauri::command]

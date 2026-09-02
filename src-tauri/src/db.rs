@@ -270,6 +270,51 @@ pub struct SaveManualAssignmentRequest {
     pub note: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdjustAssignmentRequest {
+    pub assignment_id: String,
+    pub id: String,
+    pub duty_date_id: String,
+    pub schedule_id: String,
+    pub duty_date: String,
+    pub teacher_id: String,
+    pub semester_teacher_id: String,
+    pub duty_type: String,
+    pub slot_floor: Option<String>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmMonthlyScheduleRequest {
+    pub schedule_id: String,
+    pub acknowledge_warnings: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleReviewIssue {
+    pub code: String,
+    pub severity: String,
+    pub message: String,
+    pub schedule_id: String,
+    pub duty_date: Option<String>,
+    pub teacher_id: Option<String>,
+    pub slot_floor: Option<String>,
+    pub suggested_action: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleReview {
+    pub issues: Vec<ScheduleReviewIssue>,
+    pub error_count: usize,
+    pub warning_count: usize,
+    pub info_count: usize,
+    pub can_confirm: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MonthlyExclusionView {
@@ -845,30 +890,64 @@ impl AppDb {
                 "schedule status must be DRAFT or CONFIRMED".into(),
             ));
         }
-        let conn = self.lock()?;
-        let schedule = query_monthly_schedule(&conn, id)?;
-        require_editable_semester(&conn, &schedule.semester_id)?;
+        let mut conn = self.lock()?;
+        let tx = conn.transaction()?;
+        let schedule = query_monthly_schedule(&tx, id)?;
+        require_editable_semester(&tx, &schedule.semester_id)?;
         if status == "CONFIRMED" {
-            let pending: i32 = conn.query_row(
-                "SELECT COUNT(*) FROM duty_dates
-                 WHERE schedule_id = ?1 AND special_return_source = 'PENDING_CONFIRMATION'",
-                [id],
-                |row| row.get(0),
-            )?;
-            if pending > 0 {
+            let review = schedule_review_conn(&tx, id)?;
+            if review.error_count > 0 {
                 return Err(AppError::Invalid(
-                    "resolve pending special-return dates before confirming the month".into(),
+                    "排班仍有阻断错误，不能确认；请先查看确认前检查".into(),
+                ));
+            }
+            if review.warning_count > 0 {
+                return Err(AppError::Invalid(
+                    "排班仍有警告，必须明确知情后再确认".into(),
                 ));
             }
         }
-        conn.execute(
+        tx.execute(
             "UPDATE monthly_schedules SET status = ?2,
              confirmed_at = CASE WHEN ?2 = 'CONFIRMED'
                  THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE NULL END,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
             rusqlite::params![id, status],
         )?;
+        tx.commit()?;
         query_monthly_schedule(&conn, id)
+    }
+
+    pub fn review_schedule(&self, schedule_id: &str) -> Result<ScheduleReview, AppError> {
+        let conn = self.lock()?;
+        schedule_review_conn(&conn, schedule_id)
+    }
+
+    pub fn confirm_monthly_schedule(
+        &self,
+        request: &ConfirmMonthlyScheduleRequest,
+    ) -> Result<MonthlySchedule, AppError> {
+        validate_id(&request.schedule_id, "schedule id")?;
+        let mut conn = self.lock()?;
+        let tx = conn.transaction()?;
+        let schedule = require_editable_schedule(&tx, &request.schedule_id)?;
+        let review = schedule_review_conn(&tx, &request.schedule_id)?;
+        if review.error_count > 0 {
+            return Err(AppError::Invalid(
+                "排班仍有阻断错误，不能确认；请先处理所有 ERROR".into(),
+            ));
+        }
+        if review.warning_count > 0 && !request.acknowledge_warnings {
+            return Err(AppError::Invalid("排班仍有警告，请明确知情后再确认".into()));
+        }
+        tx.execute(
+            "UPDATE monthly_schedules SET status = 'CONFIRMED',
+             confirmed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+            [&request.schedule_id],
+        )?;
+        tx.commit()?;
+        query_monthly_schedule(&conn, &schedule.id)
     }
 
     pub fn list_assignments(&self, schedule_id: &str) -> Result<Vec<AssignmentView>, AppError> {
@@ -990,6 +1069,138 @@ impl AppDb {
         list_assignments_conn(&conn, &request.schedule_id)
     }
 
+    pub fn adjust_assignment(
+        &self,
+        request: &AdjustAssignmentRequest,
+    ) -> Result<Vec<AssignmentView>, AppError> {
+        validate_id(&request.assignment_id, "assignment id")?;
+        validate_id(&request.duty_date_id, "duty date id")?;
+        validate_id(&request.teacher_id, "teacher id")?;
+        validate_id(&request.semester_teacher_id, "semester teacher id")?;
+        validate_duty_type(&request.duty_type)?;
+        if !is_valid_business_date(&request.duty_date) {
+            return Err(AppError::Invalid(
+                "assignment date must be a valid YYYY-MM-DD date".into(),
+            ));
+        }
+
+        let mut conn = self.lock()?;
+        let tx = conn.transaction()?;
+        let schedule = require_editable_schedule(&tx, &request.schedule_id)?;
+        let semester = query_semester(&tx, &schedule.semester_id)?;
+        if !request.duty_date.starts_with(&schedule.year_month)
+            || request.duty_date.as_str() < semester.start_date.as_str()
+            || request.duty_date.as_str() > semester.end_date.as_str()
+        {
+            return Err(AppError::Invalid(
+                "assignment date must belong to the schedule month and semester".into(),
+            ));
+        }
+
+        let old_date: (String, String) = tx
+            .query_row(
+                "SELECT dd.id, dd.department_mode FROM assignments a
+                 JOIN duty_dates dd ON dd.id = a.duty_date_id
+                 WHERE a.id = ?1 AND a.schedule_id = ?2",
+                rusqlite::params![request.assignment_id, request.schedule_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| AppError::Invalid("assignment not found".into()))?;
+
+        let member: (String, String) = tx
+            .query_row(
+                "SELECT teacher_id, floor_group FROM semester_teachers
+                 WHERE id = ?1 AND semester_id = ?2",
+                rusqlite::params![request.semester_teacher_id, schedule.semester_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| AppError::Invalid("teacher is not a member of this semester".into()))?;
+        if member.0 != request.teacher_id {
+            return Err(AppError::Invalid(
+                "semester teacher does not match the selected teacher".into(),
+            ));
+        }
+
+        let date_record: Option<(String, String)> = tx
+            .query_row(
+                "SELECT id, department_mode FROM duty_dates
+                 WHERE schedule_id = ?1 AND duty_date = ?2",
+                rusqlite::params![request.schedule_id, request.duty_date],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let (duty_date_id, department_mode) = if let Some(found) = date_record {
+            found
+        } else {
+            if request.duty_type != "BIG_DUTY" {
+                return Err(AppError::Invalid(
+                    "only BIG_DUTY may be moved to a non-department date".into(),
+                ));
+            }
+            tx.execute(
+                "INSERT INTO duty_dates
+                 (id, schedule_id, duty_date, department_mode, is_special_return,
+                  special_return_source, note, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'NONE', 0, 'AUTO', NULL,
+                         strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                         strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                rusqlite::params![request.duty_date_id, request.schedule_id, request.duty_date],
+            )?;
+            (request.duty_date_id.clone(), "NONE".to_string())
+        };
+
+        let slot_floor = if department_mode == "NORMAL" {
+            let floor = request.slot_floor.as_deref().unwrap_or(&member.1);
+            validate_floor(floor)?;
+            Some(floor)
+        } else {
+            if request.slot_floor.is_some() {
+                return Err(AppError::Invalid(
+                    "concentrated and non-department dates do not have floor slots".into(),
+                ));
+            }
+            None
+        };
+        if department_mode == "NONE" && request.duty_type != "BIG_DUTY" {
+            return Err(AppError::Invalid(
+                "non-department dates only support BIG_DUTY".into(),
+            ));
+        }
+
+        let changed = tx.execute(
+            "UPDATE assignments SET duty_date_id = ?3, teacher_id = ?4,
+             semester_teacher_id = ?5, duty_type = ?6, source = 'MANUAL', locked = 1,
+             occupies_department_slot = ?7, slot_floor = ?8, explanation_json = NULL,
+             note = ?9, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE id = ?1 AND schedule_id = ?2",
+            rusqlite::params![
+                request.assignment_id,
+                request.schedule_id,
+                duty_date_id,
+                request.teacher_id,
+                request.semester_teacher_id,
+                request.duty_type,
+                slot_floor.is_some(),
+                slot_floor,
+                clean_optional(&request.note),
+            ],
+        )?;
+        if changed == 0 {
+            return Err(AppError::Invalid("assignment not found".into()));
+        }
+        if old_date.1 == "NONE" && old_date.0 != duty_date_id {
+            tx.execute(
+                "DELETE FROM duty_dates WHERE id = ?1
+                 AND NOT EXISTS (SELECT 1 FROM assignments WHERE duty_date_id = ?1)",
+                [&old_date.0],
+            )?;
+        }
+        tx.commit()?;
+        list_assignments_conn(&conn, &request.schedule_id)
+    }
+
     pub fn delete_assignment(
         &self,
         schedule_id: &str,
@@ -1002,12 +1213,12 @@ impl AppDb {
             .query_row(
                 "SELECT dd.id, dd.department_mode FROM assignments a
                  JOIN duty_dates dd ON dd.id = a.duty_date_id
-                 WHERE a.id = ?1 AND a.schedule_id = ?2 AND a.source = 'MANUAL'",
+                 WHERE a.id = ?1 AND a.schedule_id = ?2",
                 rusqlite::params![assignment_id, schedule_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?
-            .ok_or_else(|| AppError::Invalid("manual assignment not found".into()))?;
+            .ok_or_else(|| AppError::Invalid("assignment not found".into()))?;
         tx.execute("DELETE FROM assignments WHERE id = ?1", [assignment_id])?;
         if date.1 == "NONE" {
             tx.execute(
@@ -1417,6 +1628,281 @@ fn list_assignments_conn(
     )?;
     let rows = stmt.query_map([schedule_id], assignment_from_row)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+fn schedule_review_conn(conn: &Connection, schedule_id: &str) -> Result<ScheduleReview, AppError> {
+    query_monthly_schedule(conn, schedule_id)?;
+    let mut issues = Vec::new();
+
+    let mut pending = conn.prepare(
+        "SELECT duty_date FROM duty_dates
+         WHERE schedule_id = ?1 AND special_return_source = 'PENDING_CONFIRMATION'
+         ORDER BY duty_date",
+    )?;
+    for row in pending.query_map([schedule_id], |row| row.get::<_, String>(0))? {
+        let duty_date = row?;
+        issues.push(ScheduleReviewIssue {
+            code: "PENDING_SPECIAL_RETURN".into(),
+            severity: "ERROR".into(),
+            message: format!("{duty_date} 的特殊返校标记仍待确认"),
+            schedule_id: schedule_id.into(),
+            duty_date: Some(duty_date),
+            teacher_id: None,
+            slot_floor: None,
+            suggested_action: Some("在月历中明确确认或取消特殊返校".into()),
+        });
+    }
+
+    let mut vacancies = conn.prepare(
+        "WITH floors(floor) AS (VALUES ('LOWER'), ('UPPER'))
+         SELECT dd.duty_date, floors.floor
+         FROM duty_dates dd CROSS JOIN floors
+         WHERE dd.schedule_id = ?1 AND dd.department_mode = 'NORMAL'
+           AND NOT EXISTS (
+             SELECT 1 FROM assignments a
+             WHERE a.duty_date_id = dd.id AND a.occupies_department_slot = 1
+               AND a.slot_floor = floors.floor
+           )
+         ORDER BY dd.duty_date, floors.floor",
+    )?;
+    let vacancy_rows = vacancies.query_map([schedule_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in vacancy_rows {
+        let (duty_date, floor) = row?;
+        let floor_name = if floor == "LOWER" {
+            "1–3 楼"
+        } else {
+            "4–5 楼"
+        };
+        issues.push(ScheduleReviewIssue {
+            code: "VACANT_DEPARTMENT_SLOT".into(),
+            severity: "ERROR".into(),
+            message: format!("{duty_date} 的 {floor_name} 岗位仍为空缺"),
+            schedule_id: schedule_id.into(),
+            duty_date: Some(duty_date),
+            teacher_id: None,
+            slot_floor: Some(floor),
+            suggested_action: Some("人工安排教师，或显式点击补齐空缺".into()),
+        });
+    }
+
+    let mut invalid_assignees = conn.prepare(
+        "SELECT dd.duty_date, a.teacher_id, a.slot_floor, st.participates, t.active
+         FROM assignments a
+         JOIN duty_dates dd ON dd.id = a.duty_date_id
+         JOIN semester_teachers st ON st.id = a.semester_teacher_id
+         JOIN teachers t ON t.id = a.teacher_id
+         WHERE a.schedule_id = ?1 AND (st.participates = 0 OR t.active = 0)
+         ORDER BY dd.duty_date, a.teacher_id",
+    )?;
+    let invalid_rows = invalid_assignees.query_map([schedule_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, bool>(3)?,
+            row.get::<_, bool>(4)?,
+        ))
+    })?;
+    for row in invalid_rows {
+        let (duty_date, teacher_id, floor, participates, active) = row?;
+        let reason = if !active {
+            "教师已停用"
+        } else if !participates {
+            "教师未参与本学期排班"
+        } else {
+            "教师不可用"
+        };
+        issues.push(ScheduleReviewIssue {
+            code: "INACTIVE_ASSIGNEE".into(),
+            severity: "ERROR".into(),
+            message: format!("{duty_date} 的安排无效：{reason}"),
+            schedule_id: schedule_id.into(),
+            duty_date: Some(duty_date),
+            teacher_id: Some(teacher_id),
+            slot_floor: floor,
+            suggested_action: Some("更换教师或恢复教师的有效状态".into()),
+        });
+    }
+
+    let mut excluded = conn.prepare(
+        "SELECT dd.duty_date, a.teacher_id, a.slot_floor, a.source
+         FROM assignments a
+         JOIN duty_dates dd ON dd.id = a.duty_date_id
+         JOIN monthly_exclusions me
+           ON me.schedule_id = a.schedule_id AND me.teacher_id = a.teacher_id
+         WHERE a.schedule_id = ?1 ORDER BY dd.duty_date, a.teacher_id",
+    )?;
+    let excluded_rows = excluded.query_map([schedule_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+    for row in excluded_rows {
+        let (duty_date, teacher_id, floor, source) = row?;
+        issues.push(ScheduleReviewIssue {
+            code: if source == "MANUAL" {
+                "EXCLUDED_MANUAL_ASSIGNMENT".into()
+            } else {
+                "EXCLUDED_AUTO_ASSIGNMENT".into()
+            },
+            severity: if source == "MANUAL" {
+                "WARNING".into()
+            } else {
+                "ERROR".into()
+            },
+            message: format!("{duty_date} 安排了本月已排除的教师"),
+            schedule_id: schedule_id.into(),
+            duty_date: Some(duty_date),
+            teacher_id: Some(teacher_id),
+            slot_floor: floor,
+            suggested_action: Some(if source == "MANUAL" {
+                "确认这是有意的人工突破".into()
+            } else {
+                "重新自动排班或将该记录改为明确的人工安排".into()
+            }),
+        });
+    }
+
+    let mut multiple = conn.prepare(
+        "SELECT a.teacher_id, MIN(dd.duty_date), COUNT(DISTINCT dd.duty_date)
+         FROM assignments a JOIN duty_dates dd ON dd.id = a.duty_date_id
+         WHERE a.schedule_id = ?1 GROUP BY a.teacher_id
+         HAVING COUNT(DISTINCT dd.duty_date) > 1 ORDER BY a.teacher_id",
+    )?;
+    let multiple_rows = multiple.query_map([schedule_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i32>(2)?,
+        ))
+    })?;
+    for row in multiple_rows {
+        let (teacher_id, first_date, count) = row?;
+        issues.push(ScheduleReviewIssue {
+            code: "MONTH_MULTIPLE_DUTIES".into(),
+            severity: "WARNING".into(),
+            message: format!("该教师本月共值班 {count} 天，已进入多轮安排"),
+            schedule_id: schedule_id.into(),
+            duty_date: Some(first_date),
+            teacher_id: Some(teacher_id),
+            slot_floor: None,
+            suggested_action: Some("结合容量与个人统计确认该多轮安排".into()),
+        });
+    }
+
+    let mut adjacent = conn.prepare(
+        "SELECT DISTINCT a1.teacher_id, d1.duty_date, d2.duty_date
+         FROM assignments a1
+         JOIN duty_dates d1 ON d1.id = a1.duty_date_id
+         JOIN assignments a2 ON a2.teacher_id = a1.teacher_id AND a2.id <> a1.id
+         JOIN duty_dates d2 ON d2.id = a2.duty_date_id
+         JOIN monthly_schedules m2 ON m2.id = a2.schedule_id
+         JOIN monthly_schedules current ON current.id = ?1
+         WHERE a1.schedule_id = ?1 AND m2.semester_id = current.semester_id
+           AND julianday(d2.duty_date) = julianday(d1.duty_date) + 1
+         ORDER BY d1.duty_date, a1.teacher_id",
+    )?;
+    let adjacent_rows = adjacent.query_map([schedule_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    for row in adjacent_rows {
+        let (teacher_id, first_date, second_date) = row?;
+        issues.push(ScheduleReviewIssue {
+            code: "ADJACENT_DUTY".into(),
+            severity: "WARNING".into(),
+            message: format!("该教师在 {first_date} 与 {second_date} 连续两天值班"),
+            schedule_id: schedule_id.into(),
+            duty_date: Some(second_date),
+            teacher_id: Some(teacher_id),
+            slot_floor: None,
+            suggested_action: Some("确认无其他合适人选，或人工换人".into()),
+        });
+    }
+
+    let (special_min, special_max): (Option<i32>, Option<i32>) = conn.query_row(
+        "SELECT MIN(special_count), MAX(special_count) FROM (
+           SELECT st.teacher_id,
+             COUNT(DISTINCT CASE WHEN dd.is_special_return = 1 THEN dd.duty_date END) special_count
+           FROM semester_teachers st JOIN teachers t ON t.id = st.teacher_id
+           LEFT JOIN monthly_schedules ms ON ms.semester_id = st.semester_id
+           LEFT JOIN assignments a ON a.schedule_id = ms.id AND a.teacher_id = st.teacher_id
+           LEFT JOIN duty_dates dd ON dd.id = a.duty_date_id
+           WHERE st.semester_id = (SELECT semester_id FROM monthly_schedules WHERE id = ?1)
+             AND st.participates = 1 AND t.active = 1
+           GROUP BY st.teacher_id
+         )",
+        [schedule_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if special_max.unwrap_or(0) - special_min.unwrap_or(0) > 1 {
+        issues.push(ScheduleReviewIssue {
+            code: "SPECIAL_RETURN_IMBALANCE".into(),
+            severity: "WARNING".into(),
+            message: format!(
+                "学期特殊返校次数差为 {}",
+                special_max.unwrap_or(0) - special_min.unwrap_or(0)
+            ),
+            schedule_id: schedule_id.into(),
+            duty_date: None,
+            teacher_id: None,
+            slot_floor: None,
+            suggested_action: Some("查看特殊返校统计并确认长期公平".into()),
+        });
+    }
+
+    let mut cross_floor = conn.prepare(
+        "SELECT dd.duty_date, a.teacher_id, a.slot_floor
+         FROM assignments a JOIN duty_dates dd ON dd.id = a.duty_date_id
+         JOIN semester_teachers st ON st.id = a.semester_teacher_id
+         WHERE a.schedule_id = ?1 AND a.occupies_department_slot = 1
+           AND a.slot_floor <> st.floor_group ORDER BY dd.duty_date, a.teacher_id",
+    )?;
+    let cross_rows = cross_floor.query_map([schedule_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    for row in cross_rows {
+        let (duty_date, teacher_id, floor) = row?;
+        issues.push(ScheduleReviewIssue {
+            code: "CROSS_FLOOR".into(),
+            severity: "INFO".into(),
+            message: format!("{duty_date} 使用了跨楼层安排"),
+            schedule_id: schedule_id.into(),
+            duty_date: Some(duty_date),
+            teacher_id: Some(teacher_id),
+            slot_floor: Some(floor),
+            suggested_action: Some("无需处理；这是可解释的人工或公平调整".into()),
+        });
+    }
+
+    let error_count = issues
+        .iter()
+        .filter(|item| item.severity == "ERROR")
+        .count();
+    let warning_count = issues
+        .iter()
+        .filter(|item| item.severity == "WARNING")
+        .count();
+    let info_count = issues.iter().filter(|item| item.severity == "INFO").count();
+    Ok(ScheduleReview {
+        issues,
+        error_count,
+        warning_count,
+        info_count,
+        can_confirm: error_count == 0,
+    })
 }
 
 fn schedule_automation_context_conn(
@@ -2261,8 +2747,13 @@ mod tests {
             .create_monthly_schedule(&schedule_request("m1", "s1", "2026-09"))
             .unwrap();
         assert_eq!(schedule.status, "DRAFT");
-        db.save_duty_date(&duty_date_request("d1", "m1", "2026-09-03", "NORMAL"))
-            .unwrap();
+        db.save_duty_date(&duty_date_request(
+            "d1",
+            "m1",
+            "2026-09-03",
+            "SPECIAL_MANUAL",
+        ))
+        .unwrap();
         let confirmed = db.set_monthly_schedule_status("m1", "CONFIRMED").unwrap();
         assert!(confirmed.confirmed_at.is_some());
         assert!(db
@@ -2783,5 +3274,283 @@ mod tests {
         });
         assert!(matches!(result, Err(AppError::Invalid(message)) if message.contains("发生变化")));
         assert!(db.list_assignments("sep").unwrap().is_empty());
+    }
+
+    #[test]
+    fn single_assignment_adjustment_preserves_other_auto_records_r038_r039_r041() {
+        let (_dir, db) = temp_db();
+        db.create_semester(&semester_request(
+            "s1",
+            "semester",
+            "2026-09-01",
+            "2027-01-31",
+        ))
+        .unwrap();
+        db.save_teacher(&teacher_request("t1", "st1", "s1", "Lower One"))
+            .unwrap();
+        db.save_teacher(&teacher_request("t2", "st2", "s1", "Lower Two"))
+            .unwrap();
+        db.create_monthly_schedule(&schedule_request("sep", "s1", "2026-09"))
+            .unwrap();
+        db.save_duty_date(&duty_date_request("d1", "sep", "2026-09-10", "NORMAL"))
+            .unwrap();
+        db.save_duty_date(&duty_date_request("d2", "sep", "2026-09-12", "NORMAL"))
+            .unwrap();
+        db.save_duty_date(&duty_date_request("d3", "sep", "2026-09-14", "NORMAL"))
+            .unwrap();
+        let context = db.schedule_automation_context("sep").unwrap();
+        db.save_auto_assignments(&SaveAutoAssignmentsRequest {
+            schedule_id: "sep".into(),
+            generation_mode: "FILL_VACANCIES".into(),
+            expected_snapshot_token: context.snapshot_token,
+            input_fingerprint: "phase6-adjust".into(),
+            assignments: vec![
+                GeneratedAutoAssignmentRequest {
+                    id: "auto-target".into(),
+                    duty_date_id: "d1".into(),
+                    teacher_id: "t1".into(),
+                    semester_teacher_id: "st1".into(),
+                    slot_floor: "LOWER".into(),
+                    explanation_json: r#"{"ruleVersion":"1.1"}"#.into(),
+                },
+                GeneratedAutoAssignmentRequest {
+                    id: "auto-other".into(),
+                    duty_date_id: "d2".into(),
+                    teacher_id: "t1".into(),
+                    semester_teacher_id: "st1".into(),
+                    slot_floor: "LOWER".into(),
+                    explanation_json: r#"{"ruleVersion":"1.1"}"#.into(),
+                },
+            ],
+        })
+        .unwrap();
+        let other_before = db
+            .list_assignments("sep")
+            .unwrap()
+            .into_iter()
+            .find(|item| item.id == "auto-other")
+            .unwrap();
+
+        db.adjust_assignment(&AdjustAssignmentRequest {
+            assignment_id: "auto-target".into(),
+            id: "auto-target".into(),
+            duty_date_id: "unused".into(),
+            schedule_id: "sep".into(),
+            duty_date: "2026-09-14".into(),
+            teacher_id: "t2".into(),
+            semester_teacher_id: "st2".into(),
+            duty_type: "NORMAL_DUTY".into(),
+            slot_floor: Some("LOWER".into()),
+            note: Some("manual replacement".into()),
+        })
+        .unwrap();
+
+        let adjusted = db.list_assignments("sep").unwrap();
+        let target = adjusted
+            .iter()
+            .find(|item| item.id == "auto-target")
+            .unwrap();
+        assert_eq!(target.teacher_id, "t2");
+        assert_eq!(target.duty_date, "2026-09-14");
+        assert_eq!(target.source, "MANUAL");
+        assert!(target.locked);
+        assert!(target.explanation_json.is_none());
+        let other_after = adjusted
+            .into_iter()
+            .find(|item| item.id == "auto-other")
+            .unwrap();
+        assert_eq!(other_after, other_before);
+
+        db.delete_assignment("sep", "auto-target").unwrap();
+        let after_delete = db.list_assignments("sep").unwrap();
+        assert_eq!(after_delete, vec![other_before]);
+        let review = db.review_schedule("sep").unwrap();
+        assert!(review.issues.iter().any(|issue| {
+            issue.code == "VACANT_DEPARTMENT_SLOT"
+                && issue.duty_date.as_deref() == Some("2026-09-14")
+                && issue.slot_floor.as_deref() == Some("LOWER")
+        }));
+    }
+
+    #[test]
+    fn confirmation_blocks_errors_and_requires_warning_acknowledgement_r043_r047_r048() {
+        let (_dir, db) = temp_db();
+        db.create_semester(&semester_request(
+            "s1",
+            "semester",
+            "2026-09-01",
+            "2027-01-31",
+        ))
+        .unwrap();
+        db.save_teacher(&teacher_request("t1", "st1", "s1", "Lower"))
+            .unwrap();
+        let mut upper = teacher_request("t2", "st2", "s1", "Upper");
+        upper.floor_group = "UPPER".into();
+        db.save_teacher(&upper).unwrap();
+        db.create_monthly_schedule(&schedule_request("sep", "s1", "2026-09"))
+            .unwrap();
+        db.save_duty_date(&duty_date_request("d1", "sep", "2026-09-10", "NORMAL"))
+            .unwrap();
+        let incomplete = db.review_schedule("sep").unwrap();
+        assert_eq!(incomplete.error_count, 2);
+        assert!(!incomplete.can_confirm);
+        assert!(db
+            .confirm_monthly_schedule(&ConfirmMonthlyScheduleRequest {
+                schedule_id: "sep".into(),
+                acknowledge_warnings: true,
+            })
+            .is_err());
+
+        db.save_monthly_exclusion(&SaveMonthlyExclusionRequest {
+            id: "e1".into(),
+            schedule_id: "sep".into(),
+            teacher_id: "t1".into(),
+            reason: None,
+        })
+        .unwrap();
+        db.save_manual_assignment(&assignment_request(
+            "a1",
+            "unused",
+            "sep",
+            "2026-09-10",
+            "t1",
+            "st1",
+            "NORMAL_DUTY",
+            Some("LOWER"),
+        ))
+        .unwrap();
+        db.save_manual_assignment(&assignment_request(
+            "a2",
+            "unused",
+            "sep",
+            "2026-09-10",
+            "t2",
+            "st2",
+            "NORMAL_DUTY",
+            Some("UPPER"),
+        ))
+        .unwrap();
+        let review = db.review_schedule("sep").unwrap();
+        assert_eq!(review.error_count, 0);
+        assert!(review.warning_count >= 1);
+        assert!(review.can_confirm);
+        assert!(db
+            .confirm_monthly_schedule(&ConfirmMonthlyScheduleRequest {
+                schedule_id: "sep".into(),
+                acknowledge_warnings: false,
+            })
+            .is_err());
+        let confirmed = db
+            .confirm_monthly_schedule(&ConfirmMonthlyScheduleRequest {
+                schedule_id: "sep".into(),
+                acknowledge_warnings: true,
+            })
+            .unwrap();
+        assert_eq!(confirmed.status, "CONFIRMED");
+    }
+
+    #[test]
+    fn historical_adjustment_rebuilds_later_statistics_without_reordering_r008_r044_r045() {
+        let (_dir, db) = temp_db();
+        db.create_semester(&semester_request(
+            "s1",
+            "semester",
+            "2026-09-01",
+            "2027-01-31",
+        ))
+        .unwrap();
+        db.save_teacher(&teacher_request("t1", "st1", "s1", "Teacher One"))
+            .unwrap();
+        db.save_teacher(&teacher_request("t2", "st2", "s1", "Teacher Two"))
+            .unwrap();
+        db.create_monthly_schedule(&schedule_request("sep", "s1", "2026-09"))
+            .unwrap();
+        db.create_monthly_schedule(&schedule_request("oct", "s1", "2026-10"))
+            .unwrap();
+        db.save_duty_date(&duty_date_request(
+            "sep-date",
+            "sep",
+            "2026-09-10",
+            "SPECIAL_MANUAL",
+        ))
+        .unwrap();
+        db.save_duty_date(&duty_date_request(
+            "oct-date",
+            "oct",
+            "2026-10-10",
+            "SPECIAL_MANUAL",
+        ))
+        .unwrap();
+        db.save_manual_assignment(&assignment_request(
+            "sep-a1",
+            "unused",
+            "sep",
+            "2026-09-10",
+            "t1",
+            "st1",
+            "TERM_SPECIAL",
+            None,
+        ))
+        .unwrap();
+        db.save_manual_assignment(&assignment_request(
+            "oct-a1",
+            "unused",
+            "oct",
+            "2026-10-10",
+            "t1",
+            "st1",
+            "TERM_SPECIAL",
+            None,
+        ))
+        .unwrap();
+        db.confirm_monthly_schedule(&ConfirmMonthlyScheduleRequest {
+            schedule_id: "sep".into(),
+            acknowledge_warnings: true,
+        })
+        .unwrap();
+        db.set_monthly_schedule_status("sep", "DRAFT").unwrap();
+        let october_before = db.list_assignments("oct").unwrap();
+        assert_eq!(
+            db.schedule_statistics("oct")
+                .unwrap()
+                .into_iter()
+                .find(|row| row.teacher_id == "t1")
+                .unwrap()
+                .semester_actual_count,
+            2
+        );
+
+        db.adjust_assignment(&AdjustAssignmentRequest {
+            assignment_id: "sep-a1".into(),
+            id: "sep-a1".into(),
+            duty_date_id: "unused".into(),
+            schedule_id: "sep".into(),
+            duty_date: "2026-09-10".into(),
+            teacher_id: "t2".into(),
+            semester_teacher_id: "st2".into(),
+            duty_type: "TERM_SPECIAL".into(),
+            slot_floor: None,
+            note: None,
+        })
+        .unwrap();
+
+        let stats = db.schedule_statistics("oct").unwrap();
+        assert_eq!(
+            stats
+                .iter()
+                .find(|row| row.teacher_id == "t1")
+                .unwrap()
+                .semester_actual_count,
+            1
+        );
+        assert_eq!(
+            stats
+                .iter()
+                .find(|row| row.teacher_id == "t2")
+                .unwrap()
+                .semester_actual_count,
+            1
+        );
+        assert_eq!(db.list_assignments("oct").unwrap(), october_before);
     }
 }
