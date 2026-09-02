@@ -4,8 +4,8 @@
 
 ## 当前状态
 
-- 已完成：Phase 0、Phase 1、Phase 2、Phase 3、Phase 4、Phase 5、Phase 6（done，2026-09-02）
-- 进行中 / 下一个：Phase 7（todo）— Excel 导出、备份与恢复
+- 已完成：Phase 0、Phase 1、Phase 2、Phase 3、Phase 4、Phase 5、Phase 6、Phase 7（done，2026-09-02）
+- 进行中 / 下一个：Phase 8（todo）— 真实数据规则验证与体验收尾
 - 不要重做已标 `done` 的 Phase，除非关闭记录里的遗留问题明确要求返工
 
 ## 开始前

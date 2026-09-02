@@ -29,6 +29,9 @@ import {
   type AdjustAssignmentRequest,
   type ConfirmMonthlyScheduleRequest,
   type ScheduleReview,
+  type ScheduleExportData,
+  type BackupPreview,
+  type BackupRestoreResult,
 } from "./types";
 
 function toAppError(error: unknown): AppError {
@@ -198,5 +201,25 @@ export class SqliteRosterRepository implements RosterRepository {
 
   saveAutoAssignments(request: SaveAutoAssignmentsRequest): Promise<Assignment[]> {
     return invokeRoster("assignment_save_auto", { request });
+  }
+
+  getScheduleExportData(scheduleId: string): Promise<ScheduleExportData> {
+    return invokeRoster("schedule_export_data", { scheduleId });
+  }
+
+  writeExportFile(path: string, bytes: number[]): Promise<string> {
+    return invokeRoster("write_export_file", { path, bytes });
+  }
+
+  createBackup(path: string): Promise<BackupPreview> {
+    return invokeRoster("backup_create", { path });
+  }
+
+  inspectBackup(path: string): Promise<BackupPreview> {
+    return invokeRoster("backup_inspect", { path });
+  }
+
+  restoreBackup(path: string, expectedRestoreToken: string): Promise<BackupRestoreResult> {
+    return invokeRoster("backup_restore", { path, expectedRestoreToken });
   }
 }

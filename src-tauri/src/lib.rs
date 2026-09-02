@@ -11,6 +11,7 @@ use db::AppDb;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_dir = app.path().app_data_dir()?;
             fs::create_dir_all(&app_dir)?;
@@ -52,6 +53,11 @@ pub fn run() {
             commands::schedule_statistics,
             commands::schedule_automation_context,
             commands::assignment_save_auto,
+            commands::schedule_export_data,
+            commands::write_export_file,
+            commands::backup_create,
+            commands::backup_inspect,
+            commands::backup_restore,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

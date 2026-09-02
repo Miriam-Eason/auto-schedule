@@ -1,8 +1,8 @@
 # 财会系值班排班系统：开发任务与验收计划
 
 > 文档版本：1.1  
-> 当前阶段：Phase 7（todo）
-> 上一完成阶段：Phase 6（done，2026-09-02）
+> 当前阶段：Phase 8（todo）
+> 上一完成阶段：Phase 7（done，2026-09-02）
 > 使用方式：每次只执行一个 Phase；先阅读全部文档和 `AGENTS.md`，再按本文件交付。结束时必须把状态从 todo 改为 done，并更新 [PHASE_STATUS.md](./PHASE_STATUS.md)。  
 > 关联文档：[PRD.md](./PRD.md)、[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[DATA_MODEL.md](./DATA_MODEL.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
@@ -269,7 +269,7 @@ duty-roster/
 
 完成项：人工/自动目标记录的换人、改日期、移动岗位、改任务和删除；目标调整保留 ID、转为人工锁定，其他自动记录不变；删除只产生空缺。新增账本复核与可定位问题清单，`ERROR` 阻断确认、`WARNING` 知情确认，已确认只读/撤回/再次确认闭环；历史调整会刷新后续统计而不重排后续月份。测试：Vitest 40、cargo test 23、typecheck/build/format/clippy 均通过；模式版本仍为 4。
 
-## Phase 7：Excel 导出、备份与恢复 【todo】
+## Phase 7：Excel 导出、备份与恢复 【done】
 
 ### 目标
 
@@ -289,6 +289,12 @@ duty-roster/
 - 导出文件用常用 Excel 软件打开无修复提示。
 - 抽查日期、楼层、人员、标签与应用一致。
 - 恢复失败不破坏原数据库；恢复成功后账本重算一致。
+
+### 状态
+
+**done**（2026-09-02）。关闭记录见 [PHASE_STATUS.md](./PHASE_STATUS.md#phase-7-关闭记录done)。
+
+完成项：锁定真实模板并导出已确认月份，覆盖普通日、集中多人、外部任务、中文日期/星期、标签/备注及实际/公平统计；通过系统文件窗口选择导出和备份位置。新增版本 1 单文件备份包、完整校验与覆盖预览、安全副本回滚和成功后复核。测试：Vitest 43、cargo test 26、typecheck/build/format/clippy、macOS `.app`/`.dmg` 均通过；全新临时数据目录恢复后账本与统计一致。模式版本仍为 4。
 
 ## Phase 8：真实数据规则验证与体验收尾 【todo】
 
@@ -358,5 +364,5 @@ duty-roster/
 
 ```text
 阅读 docs/PRD.md、docs/BUSINESS_RULES.md、docs/DATA_MODEL.md、docs/TASKS.md、docs/PHASE_STATUS.md 以及仓库 AGENTS.md。
-只实施 TASKS.md 的 Phase 7：Excel 导出、备份与恢复。先读取 `reference/排班导出模版.xlsx` 并锁定普通日、集中日、多任务标签和中文日期的字段映射；只允许导出已确认月份。实现文件选择、失败不影响账本，以及带应用/模式版本的 SQLite 一致性备份、恢复前校验与覆盖预览、失败保留原数据库、成功后完整性检查。用全新测试数据目录完成恢复演练。不要提前实施 Phase 8 的真实数据体验收尾。完成后按 AGENTS.md 关闭 Phase 7 并同步文档，等待验收。
+只实施 TASKS.md 的 Phase 8：真实数据规则验证与体验收尾。使用仓库中的一个普通月和一个特殊月脱敏历史表回放主流程，对比人工历史表与系统结果并记录每项差异对应的业务规则；完成“日期→固定任务→生成→调整→确认→导出”的目标用户流程验证，修复阻断问题、术语歧义、焦点/键盘和可访问性问题，并执行端到端回归与数据重建检查。不要提前实施 Phase 9 的发布配置。完成后按 AGENTS.md 关闭 Phase 8 并同步文档，等待验收。
 ```

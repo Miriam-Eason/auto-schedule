@@ -1,12 +1,13 @@
 use tauri::State;
 
 use crate::db::{
-    AdjustAssignmentRequest, AppDb, AssignmentView, ConfirmMonthlyScheduleRequest,
-    CreateMonthlyScheduleRequest, CreateSemesterRequest, DatabaseInfo, DutyDate, ImportResult,
-    ImportTeachersRequest, MonthlyExclusionView, MonthlySchedule, ProbeEvent,
-    SaveAutoAssignmentsRequest, SaveDutyDateRequest, SaveManualAssignmentRequest,
-    SaveMonthlyExclusionRequest, SaveTeacherRequest, ScheduleAutomationContext, ScheduleReview,
-    Semester, SemesterTeacherView, Teacher, TeacherDutyStatistics,
+    AdjustAssignmentRequest, AppDb, AssignmentView, BackupPreview, BackupRestoreResult,
+    ConfirmMonthlyScheduleRequest, CreateMonthlyScheduleRequest, CreateSemesterRequest,
+    DatabaseInfo, DutyDate, ImportResult, ImportTeachersRequest, MonthlyExclusionView,
+    MonthlySchedule, ProbeEvent, SaveAutoAssignmentsRequest, SaveDutyDateRequest,
+    SaveManualAssignmentRequest, SaveMonthlyExclusionRequest, SaveTeacherRequest,
+    ScheduleAutomationContext, ScheduleExportData, ScheduleReview, Semester, SemesterTeacherView,
+    Teacher, TeacherDutyStatistics,
 };
 use crate::error::AppError;
 
@@ -242,4 +243,40 @@ pub fn assignment_save_auto(
     request: SaveAutoAssignmentsRequest,
 ) -> Result<Vec<AssignmentView>, AppError> {
     db.save_auto_assignments(&request)
+}
+
+#[tauri::command]
+pub fn schedule_export_data(
+    db: State<AppDb>,
+    schedule_id: String,
+) -> Result<ScheduleExportData, AppError> {
+    db.schedule_export_data(&schedule_id)
+}
+
+#[tauri::command]
+pub fn write_export_file(
+    db: State<AppDb>,
+    path: String,
+    bytes: Vec<u8>,
+) -> Result<String, AppError> {
+    db.write_export_file(&path, &bytes)
+}
+
+#[tauri::command]
+pub fn backup_create(db: State<AppDb>, path: String) -> Result<BackupPreview, AppError> {
+    db.create_backup(&path)
+}
+
+#[tauri::command]
+pub fn backup_inspect(db: State<AppDb>, path: String) -> Result<BackupPreview, AppError> {
+    db.inspect_backup(&path)
+}
+
+#[tauri::command]
+pub fn backup_restore(
+    db: State<AppDb>,
+    path: String,
+    expected_restore_token: String,
+) -> Result<BackupRestoreResult, AppError> {
+    db.restore_backup(&path, &expected_restore_token)
 }

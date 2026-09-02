@@ -2,7 +2,7 @@
 
 > 文档版本：1.1  
 > 产品形态：离线桌面应用  
-> 实现状态：Phase 0–6 done（2026-09-02）；当前 Phase 7 todo
+> 实现状态：Phase 0–7 done（2026-09-02）；当前 Phase 8 todo
 > 关联文档：[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[DATA_MODEL.md](./DATA_MODEL.md)、[TASKS.md](./TASKS.md)、[PHASE_STATUS.md](./PHASE_STATUS.md)
 
 ## 1. 产品概述
@@ -200,6 +200,8 @@
 
 验收：Excel 可正常打开，中文与日期无乱码，抽查内容与应用一致。
 
+实现状态（Phase 7）：已读取并锁定 `reference/排班导出模版.xlsx` 的标题、宋体、边框、行高与打印语言；只允许读取已确认月份的一致性导出快照。主 Sheet 输出日期、星期、两楼层、任务标签和备注，集中日合并展示多人，非系部大值班也保留；“值班统计”同时输出本月/学期实际次数、初始公平次数与公平口径次数。保存前显示建议文件名并通过系统文件窗口选择位置，写文件失败不修改账本。
+
 ### F13 数据备份与恢复
 
 - 用户可导出带版本信息的一致性备份。
@@ -207,6 +209,8 @@
 - 恢复后重新加载并执行完整性检查。
 
 验收：在一台全新测试环境恢复后，教师、学期、日期、排班和状态一致。
+
+实现状态（Phase 7）：已提供单文件 `.duty-roster-backup` 一致性备份，包含格式版本、应用版本、模式版本、导出时间、数据摘要、校验值和 SQLite 快照。恢复前校验包结构、校验值、模式版本、SQLite 完整性、外键和摘要并展示覆盖预览；恢复时先生成安全副本，失败回滚原库，成功后重新加载并再次完整性检查。自动测试已在全新临时数据目录完成恢复演练并核对账本统计。
 
 ## 6. 页面与交互
 
@@ -259,6 +263,8 @@ React 19.2 / TypeScript 5.8 strict / Vite 7.3
 SQLite：rusqlite 0.40.2 bundled（Rust 命令层，非 @tauri-apps/plugin-sql）
 测试：Vitest 4、cargo test
 Excel：ExcelJS 4.4（仅本地解析，按需加载）
+文件窗口：Tauri Dialog Plugin 2.x
+SQLite 备份：rusqlite 0.40.2 backup API
 ```
 
 ### 7.2 分层
@@ -323,7 +329,7 @@ Schedule Engine（纯 TypeScript）
 ## 10. 用户提供的开发输入
 
 - `reference/系部教师名单.xlsx`：含三个 Sheet 的真实或脱敏样例。
-- `reference/排班导出模版.xlsx`：排班导出模版，当前仓库已存在，Phase 7 读取并锁定映射。
+- `reference/排班导出模版.xlsx`：排班导出模版，Phase 7 已读取并锁定标题、表格样式与六列字段映射。
 - 两个脱敏历史月份：一个普通月、一个含开学/期末或跨月连续周期的特殊月，用于算法验收。
   - `reference/财会金融系教师晚自习值班表（2025年11月）.xlsx`：普通月
   - `reference/财会金融系教师晚自习值班表（2026年4月）.xlsx`：跨月连续周期

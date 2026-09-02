@@ -275,6 +275,40 @@ export interface TeacherDutyStatistics {
   dutyDates: string[];
 }
 
+export interface ScheduleExportData {
+  semesterName: string;
+  schedule: MonthlySchedule;
+  dutyDates: DutyDate[];
+  assignments: Assignment[];
+  statistics: TeacherDutyStatistics[];
+}
+
+export interface BackupDataSummary {
+  teacherCount: number;
+  semesterCount: number;
+  scheduleCount: number;
+  dutyDateCount: number;
+  assignmentCount: number;
+}
+
+export interface BackupPreview {
+  path: string;
+  formatVersion: number;
+  appVersion: string;
+  schemaVersion: number;
+  exportedAt: string;
+  databaseBytes: number;
+  checksum: string;
+  restoreToken: string;
+  summary: BackupDataSummary;
+}
+
+export interface BackupRestoreResult {
+  schemaVersion: number;
+  integrityOk: boolean;
+  summary: BackupDataSummary;
+}
+
 export interface RosterRepository {
   listSemesters(): Promise<Semester[]>;
   createSemester(request: CreateSemesterRequest): Promise<Semester>;
@@ -309,4 +343,9 @@ export interface RosterRepository {
   getScheduleStatistics(scheduleId: string): Promise<TeacherDutyStatistics[]>;
   getScheduleAutomationContext(scheduleId: string): Promise<ScheduleAutomationContext>;
   saveAutoAssignments(request: SaveAutoAssignmentsRequest): Promise<Assignment[]>;
+  getScheduleExportData(scheduleId: string): Promise<ScheduleExportData>;
+  writeExportFile(path: string, bytes: number[]): Promise<string>;
+  createBackup(path: string): Promise<BackupPreview>;
+  inspectBackup(path: string): Promise<BackupPreview>;
+  restoreBackup(path: string, expectedRestoreToken: string): Promise<BackupRestoreResult>;
 }

@@ -859,11 +859,76 @@ td small {
   font-size: 13px;
 }
 
+.output-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  border-top: 1px solid #dce3ea;
+  padding-top: 20px;
+}
+
+.output-preview {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(280px, 1.2fr);
+  gap: 10px;
+  margin: 0;
+}
+
+.output-preview div,
+.restore-preview {
+  border: 1px solid #dce3ea;
+  border-radius: 10px;
+  padding: 12px;
+  background: #f8fafb;
+}
+
+.output-preview dt {
+  margin-bottom: 4px;
+  color: #61788a;
+  font-size: 12px;
+}
+
+.output-preview dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.panel-hint {
+  margin: 0;
+  color: #8a651f;
+}
+
+.backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.restore-preview {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  color: #435c6b;
+}
+
+.restore-preview > span {
+  overflow-wrap: anywhere;
+}
+
+.restore-preview button {
+  justify-self: start;
+  margin-top: 6px;
+}
+
 @media (max-width: 800px) {
   .inline-form,
   .teacher-form,
   .mapping-grid,
   .preview-list {
+    grid-template-columns: 1fr;
+  }
+
+  .output-preview {
     grid-template-columns: 1fr;
   }
 

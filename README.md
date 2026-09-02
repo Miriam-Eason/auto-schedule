@@ -2,7 +2,7 @@
 
 离线桌面应用：排班计算器 + 可视化编辑器 + 历史值班账本。
 
-当前完成 **Phase 0–5**（done，2026-09-02）。下一阶段是 **Phase 6**：人工调整、完整状态流与历史编辑。阶段状态与关闭记录见 [docs/PHASE_STATUS.md](docs/PHASE_STATUS.md)。
+当前完成 **Phase 0–7**（done，2026-09-02）。下一阶段是 **Phase 8**：真实数据规则验证与体验收尾。阶段状态与关闭记录见 [docs/PHASE_STATUS.md](docs/PHASE_STATUS.md)。
 
 产品文档：
 
@@ -15,15 +15,16 @@
 
 ## 技术栈（已锁定）
 
-| 层         | 版本                                             |
-| ---------- | ------------------------------------------------ |
-| Tauri      | 2.x（CLI 2.11.4 / JS API 2.11.1）                |
-| React      | 19.2                                             |
-| TypeScript | 5.8 strict                                       |
-| Vite       | 7                                                |
-| SQLite     | `rusqlite 0.40.2`，`bundled`，WAL + foreign_keys |
-| Excel      | ExcelJS 4.4（本地按需解析；`uuid` 覆盖至 11.x）  |
-| 测试       | Vitest 4、`cargo test`                           |
+| 层         | 版本                                                        |
+| ---------- | ----------------------------------------------------------- |
+| Tauri      | 2.x（CLI 2.11.4 / JS API 2.11.1）                           |
+| React      | 19.2                                                        |
+| TypeScript | 5.8 strict                                                  |
+| Vite       | 7                                                           |
+| SQLite     | `rusqlite 0.40.2`，`bundled` + `backup`，WAL + foreign_keys |
+| Excel      | ExcelJS 4.4（本地按需解析；`uuid` 覆盖至 11.x）             |
+| 文件窗口   | Tauri Dialog Plugin 2.x                                     |
+| 测试       | Vitest 4、`cargo test`                                      |
 
 未使用 `@tauri-apps/plugin-sql`：业务仓储需要事务、迁移版本表和 Rust 侧完整性检查，Phase 0 将 SQLite 放在 Rust 命令层。
 
@@ -76,8 +77,8 @@ macOS 开发模式下通常为：
 3. 为空库和已有库各写一条测试：新库直接到最新版；旧库再次 `migrate()` 不重复应用。
 4. 不要在运行时临时 `ALTER` 业务表。
 
-回滚不通过自动 down 迁移完成。恢复策略是备份/恢复（Phase 7）。
+回滚不通过自动 down 迁移完成。Phase 7 已提供带格式/应用/模式版本、导出时间、数据摘要和校验值的 `.duty-roster-backup` 一致性备份；恢复前先校验并展示覆盖摘要，失败时保留原数据库。
 
 ## 持久化探针
 
-`probe_events` 与旧探针命令仍保留用于迁移回归；当前用户界面已加入人工固定排班、月度排除、自动排班工作台、解释与派生统计。探针只用于验证本地 SQLite，不是业务功能。
+`probe_events` 与旧探针命令仍保留用于迁移回归；当前用户界面已加入人工固定排班、月度排除、自动排班工作台、解释、派生统计、Excel 导出及系统备份恢复。探针只用于验证本地 SQLite，不是业务功能。

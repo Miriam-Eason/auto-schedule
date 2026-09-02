@@ -1,8 +1,8 @@
 # 阶段状态与关闭记录
 
 > 文档版本：1.1  
-> 当前阶段：**Phase 7（todo）**
-> 上一完成阶段：**Phase 6（done，2026-09-02）**
+> 当前阶段：**Phase 8（todo）**
+> 上一完成阶段：**Phase 7（done，2026-09-02）**
 > 关联文档：[TASKS.md](./TASKS.md)、[PRD.md](./PRD.md)、[BUSINESS_RULES.md](./BUSINESS_RULES.md)、[DATA_MODEL.md](./DATA_MODEL.md)、[../AGENTS.md](../AGENTS.md)
 
 每个 Phase 结束时必须把本文件中对应条目从 `todo` 改为 `done`，并填写关闭记录。未开始的阶段保持 `todo`，不要预填完成项。
@@ -18,7 +18,7 @@
 | 4     | 纯 TypeScript 排班引擎           | done | 2026-09-02 |
 | 5     | 自动排班工作台与解释             | done | 2026-09-02 |
 | 6     | 人工调整、完整状态流与历史编辑   | done | 2026-09-02 |
-| 7     | Excel 导出、备份与恢复           | todo | —          |
+| 7     | Excel 导出、备份与恢复           | done | 2026-09-02 |
 | 8     | 真实数据规则验证与体验收尾       | todo | —          |
 | 9     | macOS 与 Windows 发布            | todo | —          |
 
@@ -459,14 +459,14 @@
 
 ### 测试结果
 
-| 命令                                        | 结果                                                                                                 |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `npm run typecheck`                         | 通过；TypeScript strict 与 Node 配置无错误                                                           |
-| `npm test`                                  | 40 通过（5 个文件）；Phase 0–5 前端/领域测试全部回归通过                                             |
+| 命令                                        | 结果                                                                                                  |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `npm run typecheck`                         | 通过；TypeScript strict 与 Node 配置无错误                                                            |
+| `npm test`                                  | 40 通过（5 个文件）；Phase 0–5 前端/领域测试全部回归通过                                              |
 | `npm run test:rust`                         | 23 通过；新增单点换人/移动/删除不洗牌、确认错误/警告门禁、历史修改刷新后续统计 3 项，既有 20 项全通过 |
-| `npm run build`                             | 通过；主块约 252 kB，ExcelJS 按需块约 937 kB（gzip 271 kB），仅保留既有 Vite 500 kB 提示             |
-| `npm run format:check`                      | 通过                                                                                                 |
-| `cargo clippy --all-targets -- -D warnings` | 通过                                                                                                 |
+| `npm run build`                             | 通过；主块约 252 kB，ExcelJS 按需块约 937 kB（gzip 271 kB），仅保留既有 Vite 500 kB 提示              |
+| `npm run format:check`                      | 通过                                                                                                  |
+| `cargo clippy --all-targets -- -D warnings` | 通过                                                                                                  |
 
 手工验证：
 
@@ -500,6 +500,75 @@
 ### 下一 Phase 输入条件
 
 已满足：只有已确认月份可作为稳定导出输入；账本已包含日期、岗位、任务、来源、集中日多人和历史统计；模式版本 4、数据库路径和完整性检查入口可供一致性备份/恢复复用；`reference/排班导出模版.xlsx` 已存在。下一步只实施 Phase 7 的 Excel 导出、备份与恢复，不提前执行 Phase 8 真实数据体验收尾。
+
+---
+
+## Phase 7 关闭记录（done）
+
+- 关闭日期：2026-09-02
+- 状态变化：`todo` → `done`
+
+### 完成项
+
+- 完整读取 `reference/排班导出模版.xlsx` 并锁定模板语言：单 Sheet 标题、宋体、表头/正文边框、固定行高和打印设置；导出时保留该视觉基线并扩展为“日期、星期、1–3 楼、4–5 楼、任务标签、备注”六列。
+- 新增已确认月份一致性导出快照；Rust 在同一数据库锁内读取月份、学期名、日期、账本和教师统计，草稿月份在数据层与前端均拒绝导出。
+- ExcelJS 按需生成两 Sheet 工作簿：“晚自习”覆盖普通双岗位、集中日多人、非系部任务、多任务标签、特殊返校和备注；“值班统计”同时展示本月实际、学期实际、初始公平、公平口径、特殊返校和历次日期，落实 R002/R004 的导出侧语义。
+- 新增 Tauri Dialog Plugin 2.x 系统文件窗口；导出前展示建议中文文件名，用户选择保存位置并由系统处理同名，写入使用同目录临时文件持久化替换，失败不修改账本。
+- 新增版本 1 `.duty-roster-backup` 单文件包：固定 magic + JSON 元数据 + rusqlite 在线备份生成的 SQLite 一致性快照；元数据包含应用/模式/格式版本、UTC 导出时间、字节数、FNV-1a 64 校验值和数据摘要。
+- 恢复预览验证包格式、长度、校验值、模式版本、SQLite 完整性、外键和数据摘要，并显示覆盖对象；恢复令牌绑定已预览内容，防止预览后文件变化。
+- 恢复执行前再校验备份并创建当前数据库安全副本；SQLite restore 或恢复后复核失败时回写安全副本，成功后再次检查模式、完整性、外键和摘要并触发前端全量刷新。
+- 新增前端 3 项 Excel 测试和 Rust 3 项导出/备份测试；在全新临时数据目录恢复备份后逐项核对教师、值班记录和账本派生统计，损坏备份测试确认原数据库探针和完整性保持不变。
+
+### 未完成项 / 明确不做
+
+- 未使用真实教师数据写入用户数据库，未执行普通月/特殊月与历史人工表的合理性差异回放；属于 Phase 8。
+- 未进行目标用户无说明主流程、键盘/焦点和可访问性收尾；属于 Phase 8。
+- 未修改发布版本、签名或 Windows 构建配置；属于 Phase 9。
+- 未新增数据库表或迁移；最新模式版本保持 4。当前备份恢复只接受模式版本 4，不兼容版本会在覆盖前拒绝。
+
+### 测试结果
+
+| 命令                                        | 结果                                                                                                                    |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `npm run typecheck`                         | 通过；TypeScript strict 与 Node 配置无错误                                                                              |
+| `npm test`                                  | 43 通过（6 个文件）；新增模板导出、中文星期、普通/集中/外部任务与实际/公平统计 3 项                                     |
+| `npm run test:rust`                         | 26 通过；新增仅确认月导出快照、全新目录备份恢复、损坏备份保留原库 3 项，既有 23 项全部回归                              |
+| `npm run build`                             | 通过；模板作为约 10 kB 资源打包，主块约 262 kB，ExcelJS 按需块约 937 kB（gzip 271 kB），仅保留既有 Vite 500 kB 大块提示 |
+| `npm run format:check`                      | 通过                                                                                                                    |
+| `cargo clippy --all-targets -- -D warnings` | 通过                                                                                                                    |
+| `npm run tauri:build`                       | 通过；沙箱内 `.app` 成功而 DMG 脚本受限，授权后重跑生成 `.app` 与 `.dmg`                                                |
+
+手工验证：
+
+- 使用脱敏夹具从真实模板生成验证工作簿，重新解析后确认两个 Sheet、日期类型、中文星期、两楼层、集中多人、任务标签、备注及实际/公平统计与输入一致。
+- 使用工作簿检查工具扫描公式错误为 0，并逐 Sheet 渲染检查；标题、表头、中文内容、换行、列宽、行高、边框和数字均完整可读，无旧模板残留行或明显裁切。
+- 检查生产构建产物包含哈希化导出模板；Tauri macOS release 二进制、`.app` 与 `.dmg` 均实际生成。
+
+### 改动文件
+
+- Excel 导出：`src/domain/{scheduleExport,scheduleExport.test}.ts`、`src/app/ScheduleExportPanel.tsx`
+- 备份恢复与 UI：`src/app/BackupRestorePanel.tsx`、`src-tauri/src/{db,commands,lib}.rs`
+- 仓储与页面：`src/repositories/{types,sqlite}.ts`、`src/app/{MonthlyCalendar,RosterApp}.tsx`、`src/App.css`
+- 依赖与权限：`package.json`、`package-lock.json`、`src-tauri/{Cargo.toml,Cargo.lock}`、`src-tauri/capabilities/default.json`
+- 阶段入口与文档：`AGENTS.md`、`README.md`、`docs/{PRD,BUSINESS_RULES,DATA_MODEL,TASKS,PHASE_STATUS}.md`
+
+### 文档更新
+
+- [PRD.md](./PRD.md)：实现状态推进到 Phase 8，补充 F12/F13 已落地范围，并记录 Dialog Plugin 与 rusqlite backup API。
+- [BUSINESS_RULES.md](./BUSINESS_RULES.md)：规则正文未改；实现状态补充 Phase 7 的 R002/R004 导出侧测试。
+- [DATA_MODEL.md](./DATA_MODEL.md)：记录版本 1 备份包结构、校验/恢复事务、安全副本和兼容范围；明确无迁移、模式版本仍为 4。
+- [TASKS.md](./TASKS.md)：Phase 7 标 done，下一任务改为 Phase 8；M3 因 Phase 8 尚未完成继续保持 todo。
+- [../README.md](../README.md) / [../AGENTS.md](../AGENTS.md)：更新当前完成范围、下一阶段、文件窗口依赖、rusqlite backup 能力与恢复说明。
+
+### 遗留问题
+
+1. ExcelJS 按需块仍触发既有 Vite 500 kB 提示，但未进入首屏主块；Phase 7 新增模板资源仅约 10 kB。
+2. 当前备份格式只支持模式版本 4；未来迁移需要明确扩大兼容矩阵或先迁移候选快照，不能直接放宽版本检查。
+3. 自动测试和脱敏工作簿已覆盖结构与数据一致性；真实历史表差异、管理合理性和目标用户流程按计划留给 Phase 8。
+
+### 下一 Phase 输入条件
+
+已满足：已确认月份可以按真实模板导出，备份/恢复闭环可在全新目录重建教师、学期、日期、排班、状态和派生统计；仓库已有普通月与特殊月脱敏历史表。下一步只实施 Phase 8 的真实数据规则验证与体验收尾，不提前修改 Phase 9 发布配置。
 
 ---
 

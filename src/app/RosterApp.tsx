@@ -15,6 +15,7 @@ import type {
   Teacher,
 } from "../repositories/types";
 import { MonthlyCalendar } from "./MonthlyCalendar";
+import { BackupRestorePanel } from "./BackupRestorePanel";
 
 interface RosterAppProps {
   repository: RosterRepository;
@@ -156,7 +157,7 @@ export function RosterApp({ repository }: RosterAppProps) {
             按步骤选择日期、排除人员、录入固定任务，再检查容量并生成可解释的自动排班。
           </p>
         </div>
-        <span className="phase-badge">Phase 6</span>
+        <span className="phase-badge">Phase 7</span>
       </header>
 
       {notice ? (
@@ -280,6 +281,7 @@ export function RosterApp({ repository }: RosterAppProps) {
           <p>教师和 Excel 导入会按学期保存快照。</p>
         </section>
       )}
+      <BackupRestorePanel repository={repository} onRestored={() => refresh()} />
     </main>
   );
 }

@@ -11,6 +11,7 @@ import type {
   SemesterTeacher,
 } from "../repositories/types";
 import { ManualRosterPanel } from "./ManualRosterPanel";
+import { ScheduleExportPanel } from "./ScheduleExportPanel";
 
 const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
 
@@ -521,6 +522,7 @@ export function MonthlyCalendar({
               );
             }}
           />
+          <ScheduleExportPanel schedule={schedule} repository={repository} />
         </>
       ) : (
         <p className="empty-row">先创建学期范围内的月份，再在月历中选择系部值班日。</p>

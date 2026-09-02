@@ -1,9 +1,12 @@
+use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use rusqlite::{Connection, OptionalExtension, Transaction};
+use rusqlite::{backup::Progress, Connection, OpenFlags, OptionalExtension, Transaction, MAIN_DB};
 use serde::{Deserialize, Serialize};
+use tempfile::NamedTempFile;
 
 use crate::error::AppError;
 
@@ -349,6 +352,63 @@ pub struct TeacherDutyStatistics {
     pub special_return_count: i32,
     pub duty_dates: Vec<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleExportData {
+    pub semester_name: String,
+    pub schedule: MonthlySchedule,
+    pub duty_dates: Vec<DutyDate>,
+    pub assignments: Vec<AssignmentView>,
+    pub statistics: Vec<TeacherDutyStatistics>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupDataSummary {
+    pub teacher_count: i64,
+    pub semester_count: i64,
+    pub schedule_count: i64,
+    pub duty_date_count: i64,
+    pub assignment_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupPreview {
+    pub path: String,
+    pub format_version: i32,
+    pub app_version: String,
+    pub schema_version: i32,
+    pub exported_at: String,
+    pub database_bytes: u64,
+    pub checksum: String,
+    pub restore_token: String,
+    pub summary: BackupDataSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupRestoreResult {
+    pub schema_version: i32,
+    pub integrity_ok: bool,
+    pub summary: BackupDataSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupManifest {
+    format_version: i32,
+    app_version: String,
+    schema_version: i32,
+    exported_at: String,
+    database_bytes: u64,
+    checksum: String,
+    summary: BackupDataSummary,
+}
+
+const BACKUP_MAGIC: &[u8] = b"DUTY_ROSTER_BACKUP_V1\n";
+const BACKUP_FORMAT_VERSION: i32 = 1;
 
 pub struct AppDb {
     conn: Mutex<Connection>,
@@ -1284,59 +1344,163 @@ impl AppDb {
         schedule_id: &str,
     ) -> Result<Vec<TeacherDutyStatistics>, AppError> {
         let conn = self.lock()?;
+        schedule_statistics_conn(&conn, schedule_id)
+    }
+
+    pub fn schedule_export_data(&self, schedule_id: &str) -> Result<ScheduleExportData, AppError> {
+        let conn = self.lock()?;
         let schedule = query_monthly_schedule(&conn, schedule_id)?;
-        let mut members = conn.prepare(
-            "SELECT st.id, st.teacher_id, st.display_name_snapshot, st.floor_group,
-                    st.initial_fairness_count
-             FROM semester_teachers st
-             WHERE st.semester_id = ?1
-             ORDER BY st.display_name_snapshot COLLATE NOCASE, st.teacher_id",
-        )?;
-        let rows = members.query_map([&schedule.semester_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, i32>(4)?,
-            ))
-        })?;
-        let members = rows.collect::<Result<Vec<_>, _>>()?;
-        let mut result = Vec::with_capacity(members.len());
-        for (semester_teacher_id, teacher_id, teacher_name, floor_group, initial) in members {
-            let mut dates_stmt = conn.prepare(
-                "SELECT DISTINCT dd.duty_date, COALESCE(dd.is_special_return, 0)
-                 FROM assignments a
-                 JOIN duty_dates dd ON dd.id = a.duty_date_id
-                 JOIN monthly_schedules ms ON ms.id = a.schedule_id
-                 WHERE a.teacher_id = ?1 AND ms.semester_id = ?2
-                 ORDER BY dd.duty_date",
-            )?;
-            let date_rows = dates_stmt
-                .query_map(rusqlite::params![teacher_id, schedule.semester_id], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
-                })?;
-            let dates = date_rows.collect::<Result<Vec<_>, _>>()?;
-            let month_actual_count = dates
-                .iter()
-                .filter(|(date, _)| date.starts_with(&schedule.year_month))
-                .count() as i32;
-            let semester_actual_count = dates.len() as i32;
-            let special_return_count = dates.iter().filter(|(_, special)| *special).count() as i32;
-            result.push(TeacherDutyStatistics {
-                semester_teacher_id,
-                teacher_id,
-                teacher_name,
-                floor_group,
-                initial_fairness_count: initial,
-                month_actual_count,
-                semester_actual_count,
-                effective_semester_count: initial + semester_actual_count,
-                special_return_count,
-                duty_dates: dates.into_iter().map(|(date, _)| date).collect(),
-            });
+        if schedule.status != "CONFIRMED" {
+            return Err(AppError::Invalid(
+                "only confirmed monthly schedules can be exported".into(),
+            ));
         }
-        Ok(result)
+        let semester_name = conn.query_row(
+            "SELECT name FROM semesters WHERE id = ?1",
+            [&schedule.semester_id],
+            |row| row.get(0),
+        )?;
+        Ok(ScheduleExportData {
+            semester_name,
+            duty_dates: list_duty_dates_conn(&conn, schedule_id)?,
+            assignments: list_assignments_conn(&conn, schedule_id)?,
+            statistics: schedule_statistics_conn(&conn, schedule_id)?,
+            schedule,
+        })
+    }
+
+    pub fn write_export_file(&self, path: &str, bytes: &[u8]) -> Result<String, AppError> {
+        let path = Path::new(path);
+        if !path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case("xlsx"))
+        {
+            return Err(AppError::Invalid(
+                "export file must use the .xlsx extension".into(),
+            ));
+        }
+        if !bytes.starts_with(b"PK") || bytes.len() > 50 * 1024 * 1024 {
+            return Err(AppError::Invalid(
+                "export workbook bytes are invalid".into(),
+            ));
+        }
+        atomic_write(path, bytes)?;
+        Ok(path.to_string_lossy().into_owned())
+    }
+
+    pub fn create_backup(&self, path: &str) -> Result<BackupPreview, AppError> {
+        let path = Path::new(path);
+        if !path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case("duty-roster-backup"))
+        {
+            return Err(AppError::Invalid(
+                "backup file must use the .duty-roster-backup extension".into(),
+            ));
+        }
+        if path == self.path {
+            return Err(AppError::Invalid(
+                "backup destination cannot overwrite the live database".into(),
+            ));
+        }
+        let conn = self.lock()?;
+        let parent = self
+            .path
+            .parent()
+            .ok_or_else(|| AppError::Invalid("database path has no parent directory".into()))?;
+        let snapshot_dir = tempfile::tempdir_in(parent)?;
+        let snapshot_path = snapshot_dir.path().join("snapshot.db");
+        conn.backup(MAIN_DB, &snapshot_path, None)?;
+        let payload = fs::read(&snapshot_path)?;
+        let snapshot = open_valid_backup_database(&snapshot_path)?;
+        let schema_version = current_version(&snapshot)?;
+        let summary = database_summary(&snapshot)?;
+        let exported_at =
+            conn.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
+                row.get(0)
+            })?;
+        let checksum = fnv1a64_bytes(&payload);
+        let manifest = BackupManifest {
+            format_version: BACKUP_FORMAT_VERSION,
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            schema_version,
+            exported_at,
+            database_bytes: payload.len() as u64,
+            checksum,
+            summary,
+        };
+        let package = encode_backup(&manifest, &payload)?;
+        atomic_write(path, &package)?;
+        preview_from_manifest(path, &manifest)
+    }
+
+    pub fn inspect_backup(&self, path: &str) -> Result<BackupPreview, AppError> {
+        let package = fs::read(path)?;
+        let (manifest, payload) = decode_backup(&package)?;
+        validate_backup(&manifest, payload)?;
+        preview_from_manifest(Path::new(path), &manifest)
+    }
+
+    pub fn restore_backup(
+        &self,
+        path: &str,
+        expected_restore_token: &str,
+    ) -> Result<BackupRestoreResult, AppError> {
+        let package = fs::read(path)?;
+        let (manifest, payload) = decode_backup(&package)?;
+        validate_backup(&manifest, payload)?;
+        let preview = preview_from_manifest(Path::new(path), &manifest)?;
+        if preview.restore_token != expected_restore_token {
+            return Err(AppError::Invalid(
+                "backup changed after preview; inspect it again before restoring".into(),
+            ));
+        }
+
+        let parent = self
+            .path
+            .parent()
+            .ok_or_else(|| AppError::Invalid("database path has no parent directory".into()))?;
+        let mut candidate = NamedTempFile::new_in(parent)?;
+        candidate.write_all(payload)?;
+        candidate.flush()?;
+        candidate.as_file().sync_all()?;
+
+        let mut conn = self.lock()?;
+        let safety_dir = tempfile::tempdir_in(parent)?;
+        let safety_path = safety_dir.path().join("before-restore.db");
+        conn.backup(MAIN_DB, &safety_path, None)?;
+
+        if let Err(error) = conn.restore(MAIN_DB, candidate.path(), None::<fn(Progress)>) {
+            let message = error.to_string();
+            restore_safety_copy(&mut conn, &safety_path, &message)?;
+            return Err(AppError::Database(format!(
+                "restore failed and the original database was preserved: {message}"
+            )));
+        }
+
+        let validation = validate_live_database(&conn);
+        if let Err(error) = validation {
+            let message = error.to_string();
+            restore_safety_copy(&mut conn, &safety_path, &message)?;
+            return Err(AppError::Database(format!(
+                "restored database failed validation and the original database was preserved: {message}"
+            )));
+        }
+        let summary = database_summary(&conn)?;
+        if summary != manifest.summary {
+            let message = "restored data summary does not match the validated backup";
+            restore_safety_copy(&mut conn, &safety_path, message)?;
+            return Err(AppError::Database(format!(
+                "{message}; the original database was preserved"
+            )));
+        }
+        Ok(BackupRestoreResult {
+            schema_version: current_version(&conn)?,
+            integrity_ok: true,
+            summary,
+        })
     }
 
     pub fn schedule_automation_context(
@@ -1628,6 +1792,249 @@ fn list_assignments_conn(
     )?;
     let rows = stmt.query_map([schedule_id], assignment_from_row)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+fn schedule_statistics_conn(
+    conn: &Connection,
+    schedule_id: &str,
+) -> Result<Vec<TeacherDutyStatistics>, AppError> {
+    let schedule = query_monthly_schedule(conn, schedule_id)?;
+    let mut members = conn.prepare(
+        "SELECT st.id, st.teacher_id, st.display_name_snapshot, st.floor_group,
+                st.initial_fairness_count
+         FROM semester_teachers st
+         WHERE st.semester_id = ?1
+         ORDER BY st.display_name_snapshot COLLATE NOCASE, st.teacher_id",
+    )?;
+    let rows = members.query_map([&schedule.semester_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, i32>(4)?,
+        ))
+    })?;
+    let members = rows.collect::<Result<Vec<_>, _>>()?;
+    let mut result = Vec::with_capacity(members.len());
+    for (semester_teacher_id, teacher_id, teacher_name, floor_group, initial) in members {
+        let mut dates_stmt = conn.prepare(
+            "SELECT DISTINCT dd.duty_date, COALESCE(dd.is_special_return, 0)
+             FROM assignments a
+             JOIN duty_dates dd ON dd.id = a.duty_date_id
+             JOIN monthly_schedules ms ON ms.id = a.schedule_id
+             WHERE a.teacher_id = ?1 AND ms.semester_id = ?2
+             ORDER BY dd.duty_date",
+        )?;
+        let date_rows = dates_stmt
+            .query_map(rusqlite::params![teacher_id, schedule.semester_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+            })?;
+        let dates = date_rows.collect::<Result<Vec<_>, _>>()?;
+        let month_actual_count = dates
+            .iter()
+            .filter(|(date, _)| date.starts_with(&schedule.year_month))
+            .count() as i32;
+        let semester_actual_count = dates.len() as i32;
+        let special_return_count = dates.iter().filter(|(_, special)| *special).count() as i32;
+        result.push(TeacherDutyStatistics {
+            semester_teacher_id,
+            teacher_id,
+            teacher_name,
+            floor_group,
+            initial_fairness_count: initial,
+            month_actual_count,
+            semester_actual_count,
+            effective_semester_count: initial + semester_actual_count,
+            special_return_count,
+            duty_dates: dates.into_iter().map(|(date, _)| date).collect(),
+        });
+    }
+    Ok(result)
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
+    let parent = path
+        .parent()
+        .filter(|value| !value.as_os_str().is_empty())
+        .ok_or_else(|| AppError::Invalid("destination must include a parent directory".into()))?;
+    fs::create_dir_all(parent)?;
+    let mut temporary = NamedTempFile::new_in(parent)?;
+    temporary.write_all(bytes)?;
+    temporary.flush()?;
+    temporary.as_file().sync_all()?;
+    temporary
+        .persist(path)
+        .map_err(|error| AppError::Io(error.error))?;
+    Ok(())
+}
+
+fn encode_backup(manifest: &BackupManifest, payload: &[u8]) -> Result<Vec<u8>, AppError> {
+    let header = serde_json::to_vec(manifest)
+        .map_err(|error| AppError::Database(format!("serialize backup metadata: {error}")))?;
+    let mut result = Vec::with_capacity(BACKUP_MAGIC.len() + 8 + header.len() + payload.len());
+    result.extend_from_slice(BACKUP_MAGIC);
+    result.extend_from_slice(&(header.len() as u64).to_le_bytes());
+    result.extend_from_slice(&header);
+    result.extend_from_slice(payload);
+    Ok(result)
+}
+
+fn decode_backup(bytes: &[u8]) -> Result<(BackupManifest, &[u8]), AppError> {
+    if !bytes.starts_with(BACKUP_MAGIC) {
+        return Err(AppError::Invalid("not a duty roster backup file".into()));
+    }
+    let length_start = BACKUP_MAGIC.len();
+    let length_end = length_start + 8;
+    if bytes.len() < length_end {
+        return Err(AppError::Invalid("backup metadata is incomplete".into()));
+    }
+    let mut length_bytes = [0_u8; 8];
+    length_bytes.copy_from_slice(&bytes[length_start..length_end]);
+    let header_len = usize::try_from(u64::from_le_bytes(length_bytes))
+        .map_err(|_| AppError::Invalid("backup metadata is too large".into()))?;
+    let payload_start = length_end
+        .checked_add(header_len)
+        .ok_or_else(|| AppError::Invalid("backup metadata length is invalid".into()))?;
+    if payload_start > bytes.len() {
+        return Err(AppError::Invalid("backup metadata is incomplete".into()));
+    }
+    let manifest: BackupManifest = serde_json::from_slice(&bytes[length_end..payload_start])
+        .map_err(|_| AppError::Invalid("backup metadata is invalid".into()))?;
+    Ok((manifest, &bytes[payload_start..]))
+}
+
+fn validate_backup(manifest: &BackupManifest, payload: &[u8]) -> Result<(), AppError> {
+    if manifest.format_version != BACKUP_FORMAT_VERSION {
+        return Err(AppError::Invalid(format!(
+            "unsupported backup format version {}",
+            manifest.format_version
+        )));
+    }
+    if manifest.schema_version != LATEST_SCHEMA_VERSION {
+        return Err(AppError::Invalid(format!(
+            "backup schema version {} is not supported by this app (requires {})",
+            manifest.schema_version, LATEST_SCHEMA_VERSION
+        )));
+    }
+    if manifest.database_bytes != payload.len() as u64 {
+        return Err(AppError::Invalid(
+            "backup database length does not match metadata".into(),
+        ));
+    }
+    if manifest.checksum != fnv1a64_bytes(payload) {
+        return Err(AppError::Invalid(
+            "backup checksum validation failed".into(),
+        ));
+    }
+
+    let mut candidate = NamedTempFile::new()?;
+    candidate.write_all(payload)?;
+    candidate.flush()?;
+    let conn = open_valid_backup_database(candidate.path())?;
+    if current_version(&conn)? != manifest.schema_version {
+        return Err(AppError::Invalid(
+            "backup schema version does not match its metadata".into(),
+        ));
+    }
+    if database_summary(&conn)? != manifest.summary {
+        return Err(AppError::Invalid(
+            "backup data summary does not match its metadata".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn open_valid_backup_database(path: &Path) -> Result<Connection, AppError> {
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    validate_live_database(&conn)?;
+    Ok(conn)
+}
+
+fn validate_live_database(conn: &Connection) -> Result<(), AppError> {
+    let integrity: String = conn.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+    if !integrity.eq_ignore_ascii_case("ok") {
+        return Err(AppError::Invalid("SQLite integrity check failed".into()));
+    }
+    let version = current_version(conn)?;
+    if version != LATEST_SCHEMA_VERSION {
+        return Err(AppError::Invalid(format!(
+            "database schema version {version} is not supported"
+        )));
+    }
+    let foreign_key_errors: i64 =
+        conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })?;
+    if foreign_key_errors != 0 {
+        return Err(AppError::Invalid(format!(
+            "database has {foreign_key_errors} foreign key violations"
+        )));
+    }
+    Ok(())
+}
+
+fn database_summary(conn: &Connection) -> Result<BackupDataSummary, AppError> {
+    Ok(BackupDataSummary {
+        teacher_count: table_count(conn, "teachers")?,
+        semester_count: table_count(conn, "semesters")?,
+        schedule_count: table_count(conn, "monthly_schedules")?,
+        duty_date_count: table_count(conn, "duty_dates")?,
+        assignment_count: table_count(conn, "assignments")?,
+    })
+}
+
+fn table_count(conn: &Connection, table: &str) -> Result<i64, AppError> {
+    let sql = format!("SELECT COUNT(*) FROM {table}");
+    Ok(conn.query_row(&sql, [], |row| row.get(0))?)
+}
+
+fn preview_from_manifest(
+    path: &Path,
+    manifest: &BackupManifest,
+) -> Result<BackupPreview, AppError> {
+    let restore_token = format!(
+        "{}:{}:{}",
+        manifest.checksum, manifest.schema_version, manifest.database_bytes
+    );
+    Ok(BackupPreview {
+        path: path.to_string_lossy().into_owned(),
+        format_version: manifest.format_version,
+        app_version: manifest.app_version.clone(),
+        schema_version: manifest.schema_version,
+        exported_at: manifest.exported_at.clone(),
+        database_bytes: manifest.database_bytes,
+        checksum: manifest.checksum.clone(),
+        restore_token,
+        summary: manifest.summary.clone(),
+    })
+}
+
+fn restore_safety_copy(
+    conn: &mut Connection,
+    safety_path: &Path,
+    original_error: &str,
+) -> Result<(), AppError> {
+    conn.restore(MAIN_DB, safety_path, None::<fn(Progress)>)
+        .map_err(|rollback_error| {
+            AppError::Database(format!(
+                "restore failed ({original_error}); preserving the original database also failed: {rollback_error}"
+            ))
+        })?;
+    validate_live_database(conn).map_err(|rollback_error| {
+        AppError::Database(format!(
+            "restore failed ({original_error}); the safety copy could not be validated: {rollback_error}"
+        ))
+    })
+}
+
+fn fnv1a64_bytes(value: &[u8]) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in value {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 fn schedule_review_conn(conn: &Connection, schedule_id: &str) -> Result<ScheduleReview, AppError> {
@@ -3552,5 +3959,127 @@ mod tests {
             1
         );
         assert_eq!(db.list_assignments("oct").unwrap(), october_before);
+    }
+
+    fn seed_confirmed_export_schedule(db: &AppDb) {
+        db.create_semester(&semester_request(
+            "s-export",
+            "Export Semester",
+            "2026-09-01",
+            "2027-01-31",
+        ))
+        .unwrap();
+        db.save_teacher(&teacher_request(
+            "t-export",
+            "st-export",
+            "s-export",
+            "Export Teacher",
+        ))
+        .unwrap();
+        db.create_monthly_schedule(&schedule_request("m-export", "s-export", "2026-09"))
+            .unwrap();
+        db.save_duty_date(&duty_date_request(
+            "d-export",
+            "m-export",
+            "2026-09-01",
+            "SPECIAL_MANUAL",
+        ))
+        .unwrap();
+        db.save_manual_assignment(&assignment_request(
+            "a-export",
+            "d-export",
+            "m-export",
+            "2026-09-01",
+            "t-export",
+            "st-export",
+            "TERM_SPECIAL",
+            None,
+        ))
+        .unwrap();
+    }
+
+    #[test]
+    fn export_snapshot_requires_a_confirmed_month_and_keeps_statistics() {
+        let (_dir, db) = temp_db();
+        seed_confirmed_export_schedule(&db);
+        assert!(matches!(
+            db.schedule_export_data("m-export"),
+            Err(AppError::Invalid(_))
+        ));
+        db.confirm_monthly_schedule(&ConfirmMonthlyScheduleRequest {
+            schedule_id: "m-export".into(),
+            acknowledge_warnings: true,
+        })
+        .unwrap();
+
+        let export = db.schedule_export_data("m-export").unwrap();
+        assert_eq!(export.semester_name, "Export Semester");
+        assert_eq!(export.schedule.status, "CONFIRMED");
+        assert_eq!(export.duty_dates.len(), 1);
+        assert_eq!(export.assignments.len(), 1);
+        assert_eq!(export.statistics[0].month_actual_count, 1);
+        assert_eq!(export.statistics[0].effective_semester_count, 1);
+    }
+
+    #[test]
+    fn backup_restores_into_a_fresh_data_directory_with_matching_ledger() {
+        let source_dir = TempDir::new().unwrap();
+        let source = AppDb::open(&source_dir.path().join("duty-roster.db")).unwrap();
+        seed_confirmed_export_schedule(&source);
+        source
+            .confirm_monthly_schedule(&ConfirmMonthlyScheduleRequest {
+                schedule_id: "m-export".into(),
+                acknowledge_warnings: true,
+            })
+            .unwrap();
+        let backup_path = source_dir.path().join("roundtrip.duty-roster-backup");
+        let created = source.create_backup(backup_path.to_str().unwrap()).unwrap();
+        assert_eq!(created.schema_version, latest_schema_version());
+        assert_eq!(created.summary.assignment_count, 1);
+
+        let fresh_dir = TempDir::new().unwrap();
+        let restored = AppDb::open(&fresh_dir.path().join("duty-roster.db")).unwrap();
+        assert!(restored.list_teachers().unwrap().is_empty());
+        let preview = restored
+            .inspect_backup(backup_path.to_str().unwrap())
+            .unwrap();
+        let result = restored
+            .restore_backup(backup_path.to_str().unwrap(), &preview.restore_token)
+            .unwrap();
+
+        assert!(result.integrity_ok);
+        assert_eq!(result.summary, created.summary);
+        assert_eq!(restored.list_teachers().unwrap()[0].name, "Export Teacher");
+        assert_eq!(restored.list_assignments("m-export").unwrap().len(), 1);
+        assert_eq!(
+            restored.schedule_statistics("m-export").unwrap(),
+            source.schedule_statistics("m-export").unwrap()
+        );
+    }
+
+    #[test]
+    fn corrupted_backup_is_rejected_without_changing_the_current_database() {
+        let source_dir = TempDir::new().unwrap();
+        let source = AppDb::open(&source_dir.path().join("duty-roster.db")).unwrap();
+        let backup_path = source_dir.path().join("corrupt.duty-roster-backup");
+        source.create_backup(backup_path.to_str().unwrap()).unwrap();
+        let mut bytes = fs::read(&backup_path).unwrap();
+        let last = bytes.last_mut().unwrap();
+        *last ^= 0xff;
+        fs::write(&backup_path, bytes).unwrap();
+
+        let target_dir = TempDir::new().unwrap();
+        let target = AppDb::open(&target_dir.path().join("duty-roster.db")).unwrap();
+        target
+            .insert_probe(&sample_event("keep", "must survive"))
+            .unwrap();
+        assert!(target
+            .inspect_backup(backup_path.to_str().unwrap())
+            .is_err());
+        assert!(target
+            .restore_backup(backup_path.to_str().unwrap(), "stale-token")
+            .is_err());
+        assert_eq!(target.list_probe().unwrap()[0].message, "must survive");
+        assert!(target.integrity_ok().unwrap());
     }
 }
